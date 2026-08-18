@@ -11,6 +11,7 @@ import {
   Wallet, PiggyBank, Banknote, ArrowUpRight, ArrowDownRight, Menu, Info, Sprout,
   ShoppingBag, ShoppingCart, Home, Car, Utensils, Heart, Flower2, Film, GraduationCap,
   Plane, Laptop, Award, Briefcase, Clock, ArrowRight, FileText, Loader2, Cloud,
+  MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -49,6 +50,55 @@ const GLOBAL_STYLES = `
   --alert-soft: #FBF1E0;
 }
 
+.cerne-root.dark {
+  --primary: #8FA680;
+  --primary-dark: #7A9068;
+  --primary-soft: #2E3A28;
+  --secondary: #8A9B7D;
+  --bg: #1C1B18;
+  --card: #26251F;
+  --border: #38362E;
+  --text: #EDEAE2;
+  --text-soft: #A6A296;
+  --income: #7FB37F;
+  --income-soft: #24352A;
+  --expense: #D98888;
+  --expense-soft: #3A2626;
+  --invest: #8FA0C9;
+  --invest-soft: #262B3A;
+  --goals: #C9B896;
+  --goals-soft: #332E23;
+  --alert: #E6BC6C;
+  --alert-soft: #3A2F1A;
+}
+.cerne-root.dark .shadow-soft,
+.cerne-root.dark .shadow-soft-lg { box-shadow: 0 1px 2px rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.3); }
+.cerne-root.dark .skeleton { background: linear-gradient(90deg, #2E2C26 25%, #38362E 37%, #2E2C26 63%); background-size: 400px 100%; }
+/* Os overlays de hover foram pensados pra fundo claro (escurecem levemente) — no escuro, viram
+   quase invisíveis. Troca pra um overlay branco sutil só dentro do tema escuro. */
+.cerne-root.dark .hover\:bg-black\/5:hover,
+.cerne-root.dark .hover\:bg-black\/10:hover { background-color: rgba(255,255,255,0.08) !important; }
+.cerne-root.dark .bg-black\/\[0\.02\] { background-color: rgba(255,255,255,0.03) !important; }
+.cerne-root.dark .bg-black\/\[0\.03\] { background-color: rgba(255,255,255,0.04) !important; }
+
+/* Temas de cor de destaque (opcionais, escolhidos em Configurações → Aparência).
+   Cada um só troca --primary / --primary-dark / --primary-soft; o resto dos tokens
+   (fundo, texto, bordas, cores semânticas) continua vindo de :root / .dark acima. */
+.cerne-root.theme-azul { --primary: #4A6FA5; --primary-dark: #3B5A87; --primary-soft: #E6ECF3; }
+.cerne-root.theme-azul.dark { --primary: #7CA3D6; --primary-dark: #6690C7; --primary-soft: #26303F; }
+
+.cerne-root.theme-rosa { --primary: #B5677E; --primary-dark: #9A5268; --primary-soft: #F5E9EC; }
+.cerne-root.theme-rosa.dark { --primary: #D98CA0; --primary-dark: #C4728A; --primary-soft: #3A2830; }
+
+.cerne-root.theme-vermelho { --primary: #A85D4E; --primary-dark: #8E4B3E; --primary-soft: #F3E7E3; }
+.cerne-root.theme-vermelho.dark { --primary: #CC8271; --primary-dark: #B96D5C; --primary-soft: #3A2A24; }
+
+.cerne-root.theme-branco { --primary: #3A3A3A; --primary-dark: #2A2A2A; --primary-soft: #EDEDEC; }
+.cerne-root.theme-branco.dark { --primary: #C9C9C9; --primary-dark: #B5B5B5; --primary-soft: #333333; }
+
+.cerne-root.theme-ameixa { --primary: #7D5A82; --primary-dark: #664867; --primary-soft: #EFE7F0; }
+.cerne-root.theme-ameixa.dark { --primary: #B08AB8; --primary-dark: #9B76A3; --primary-soft: #332B36; }
+
 .cerne-root, .cerne-root * { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
 .font-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
 
@@ -79,6 +129,12 @@ const GLOBAL_STYLES = `
   .no-print { display: none !important; }
   .print-area { padding: 0 !important; overflow: visible !important; }
 }
+
+/* Remove o contorno de foco padrão do navegador ao tocar numa fatia do gráfico de pizza —
+   sem isso, toques no celular desenham um retângulo preto ao redor da fatia selecionada. */
+.recharts-wrapper svg *:focus,
+.recharts-pie-sector,
+.recharts-sector { outline: none !important; }
 `;
 
 const CATEGORIES = {
@@ -113,6 +169,22 @@ function formatDateLong(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
+function formatMonthYear(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+  return label.charAt(0).toUpperCase() + label.slice(1).replace('.', '');
+}
+function relativeTime(date) {
+  if (!date) return '';
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'agora mesmo';
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.round(hours / 24);
+  return `há ${days}d`;
+}
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 12) return 'Bom dia';
@@ -140,8 +212,12 @@ const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'S
 /* ---------- Agregações reais (a partir dos lançamentos, contas etc.) ---------- */
 
 // Efeito de um lançamento sobre o saldo da conta: só lançamentos "Pago" já saíram/entraram de fato.
+// Uma despesa "no crédito" (com cardId) só debita a conta quando a fatura é paga — não no
+// momento da compra. Receitas e despesas fora do cartão (Pix, débito, dinheiro...) continuam
+// afetando o saldo na hora, como sempre.
 function transactionBalanceEffect(t) {
   if (!t || t.status !== 'Pago') return 0;
+  if (t.type === 'despesa' && t.cardId) return 0;
   return t.type === 'receita' ? t.amount : -t.amount;
 }
 function applyBalanceDelta(accountsList, accountId, delta) {
@@ -193,6 +269,15 @@ function computeCategoryTotals(transactions, year, month) {
     totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
   return totals;
+}
+
+// Fatura de um cartão: soma de tudo que foi lançado nele (despesas "Pago" com esse cardId)
+// desde o último pagamento registrado. Não é mais um número solto — é sempre o espelho real
+// dos lançamentos, então trocar o cartão de uma despesa atualiza a fatura na hora.
+function computeCardInvoice(card, transactions) {
+  return transactions
+    .filter((t) => t.cardId === card.id && t.status === 'Pago' && t.type === 'despesa' && (!card.paidThroughDate || t.date > card.paidThroughDate))
+    .reduce((s, t) => s + t.amount, 0);
 }
 
 /* ---------- Dias úteis / feriados nacionais (para vencimento adaptativo) ---------- */
@@ -455,9 +540,9 @@ const initialAccounts = [
 ];
 
 const initialCards = [
-  { id: 'card-1', bank: 'Nubank', brand: 'Mastercard Black', limit: 8000, used: 6240, invoice: 2180, closingDay: 22, dueDay: 29 },
-  { id: 'card-2', bank: 'Itaú', brand: 'Visa Click', limit: 5000, used: 1870, invoice: 1450, closingDay: 5, dueDay: 12 },
-  { id: 'card-3', bank: 'Inter', brand: 'Gold Mastercard', limit: 4000, used: 980, invoice: 620, closingDay: 15, dueDay: 22 },
+  { id: 'card-1', bank: 'Nubank', brand: 'Mastercard Black', accountId: 'acc-1', limit: 8000, closingDay: 22, dueDay: 29, paidThroughDate: null },
+  { id: 'card-2', bank: 'Itaú', brand: 'Visa Click', accountId: 'acc-2', limit: 5000, closingDay: 5, dueDay: 12, paidThroughDate: null },
+  { id: 'card-3', bank: 'Inter', brand: 'Gold Mastercard', accountId: 'acc-3', limit: 4000, closingDay: 15, dueDay: 22, paidThroughDate: null },
 ];
 
 const initialBenefits = [
@@ -478,7 +563,18 @@ const initialGoals = [
     { date: '2026-07-15', amount: 900 },
   ] },
 ];
-const GOAL_ICONS = { Wallet, Plane, Laptop, Award };
+const GOAL_ICONS = { Wallet, Plane, Laptop, Award, Home, Car, Bike, Shirt, GraduationCap, Heart, Briefcase, Sprout, PersonStanding, PiggyBank };
+
+// Temas de cor de destaque, cada um com uma variante para claro e uma para escuro.
+// As cores semânticas (receita, despesa, investimento, meta, alerta) não mudam entre temas.
+const COLOR_THEMES = {
+  default: { label: 'Verde militar', light: '#5D7052', dark: '#8FA680' },
+  azul: { label: 'Azul', light: '#4A6FA5', dark: '#7CA3D6' },
+  rosa: { label: 'Rosa', light: '#B5677E', dark: '#D98CA0' },
+  vermelho: { label: 'Terracota', light: '#A85D4E', dark: '#CC8271' },
+  branco: { label: 'Monocromático', light: '#3A3A3A', dark: '#C9C9C9' },
+  ameixa: { label: 'Ameixa', light: '#7D5A82', dark: '#B08AB8' },
+};
 
 const initialCaixinhas = [
   { id: 'cx-1', name: 'Imprevistos do dia a dia', balance: 340, accountId: 'acc-1' },
@@ -545,7 +641,6 @@ function buildInitialTransactions() {
     ['2026-08-19', 'Farmácia', 'Saúde', 'despesa', 'acc-1', 'Pix', 45, 'Pago'],
     ['2026-08-20', 'Amazon Prime', 'Lazer', 'despesa', 'acc-1', 'Cartão de crédito', 14.90, 'Pago'],
     ['2026-08-20', 'Água', 'Moradia', 'despesa', 'acc-2', 'Boleto', 95, 'Pendente'],
-    ['2026-08-22', 'Fatura cartão Nubank', 'Outros', 'despesa', 'acc-1', 'Boleto', 2180, 'Agendado'],
     ['2026-07-01', 'Salário', 'Outros', 'receita', 'acc-2', 'Transferência', 6200, 'Pago'],
     ['2026-07-02', 'Supermercado', 'Mercado', 'despesa', 'acc-1', 'Cartão de débito', 260, 'Pago'],
     ['2026-07-03', 'Aluguel', 'Moradia', 'despesa', 'acc-2', 'Transferência', 1150, 'Pago'],
@@ -565,10 +660,14 @@ function buildInitialTransactions() {
     ['2026-06-15', 'Manutenção do carro', 'Transporte', 'despesa', 'acc-1', 'Pix', 380, 'Pago'],
     ['2026-06-20', 'Roupas de inverno', 'Compras', 'despesa', 'acc-1', 'Cartão de crédito', 310, 'Pago'],
   ];
-  return rows.map((r) => ({
-    id: uid(), date: r[0], description: r[1], category: r[2], type: r[3],
-    account: r[4], paymentMethod: r[5], amount: r[6], status: r[7],
-  }));
+  return rows.map((r) => {
+    const accountToCard = { 'acc-1': 'card-1', 'acc-2': 'card-2', 'acc-3': 'card-3' };
+    return {
+      id: uid(), date: r[0], description: r[1], category: r[2], type: r[3],
+      account: r[4], paymentMethod: r[5], amount: r[6], status: r[7],
+      cardId: r[5] === 'Cartão de crédito' ? accountToCard[r[4]] || null : null,
+    };
+  });
 }
 
 /* ---------- Persistência (localStorage do navegador) ---------- */
@@ -593,7 +692,7 @@ async function saveAppData(data) {
 
 /* ---------- Insights inteligentes ---------- */
 
-function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = [], categoryComparison }) {
+function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = [], cards = [], categoryComparison }) {
   const insights = [];
   const thisMonth = mh[mh.length - 1];
   const lastMonth = mh.length > 1 ? mh[mh.length - 2] : null;
@@ -602,6 +701,27 @@ function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = 
     insights.unshift({
       icon: AlertCircle, tone: 'expense',
       text: `Saldo da conta ${a.bank} está em ${formatBRL(a.balance)}, abaixo do limite de alerta que você definiu (${formatBRL(a.alertThreshold)}).`,
+    });
+  });
+
+  cards.forEach((c) => {
+    const due = getNextCardDueDate(c);
+    const daysLeft = Math.round((due - new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())) / 86400000);
+    if (daysLeft >= 0 && daysLeft <= 5) {
+      const invoice = computeCardInvoice(c, transactions);
+      insights.unshift({
+        icon: CalendarIcon, tone: 'alert',
+        text: daysLeft === 0
+          ? `A fatura do cartão ${c.bank} vence hoje (${formatBRL(invoice)}).`
+          : `A fatura do cartão ${c.bank} vence em ${daysLeft} dia(s) (${formatBRL(invoice)}).`,
+      });
+    }
+  });
+
+  goals.filter((g) => g.current < g.target && g.current / g.target >= 0.9).forEach((g) => {
+    insights.push({
+      icon: Target, tone: 'goals',
+      text: `Você atingiu ${((g.current / g.target) * 100).toFixed(0)}% da meta "${g.name}".`,
     });
   });
 
@@ -832,6 +952,24 @@ function ConfirmModal({ title, description, onConfirm, onClose }) {
   );
 }
 
+function SyncConflictModal({ date, onUseRemote, onKeepLocal }) {
+  return (
+    <Modal title="Encontramos uma versão mais recente" onClose={onKeepLocal}>
+      <div className="space-y-4">
+        <p className="text-sm flex items-start gap-2" style={{ color: 'var(--text)' }}>
+          <Cloud size={16} className="mt-0.5 shrink-0" color="var(--primary)" />
+          Parece que você fez alterações em outro aparelho. O backup mais recente no Dropbox é de <strong>{relativeTime(date)}</strong> — mais novo que os dados deste navegador.
+        </p>
+        <div className="flex flex-col gap-2">
+          <Button onClick={onUseRemote}>Usar a versão do Dropbox</Button>
+          <Button variant="secondary" onClick={onKeepLocal}>Manter os dados deste aparelho</Button>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Usar a versão do Dropbox substitui os dados deste navegador. Manter os dados daqui reenvia essa versão para o Dropbox, sobrescrevendo o backup mais novo.</p>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------- Toasts ---------- */
 
 function ToastContainer({ toasts }) {
@@ -849,7 +987,7 @@ function ToastContainer({ toasts }) {
 
 /* ---------- Formulário: campo de moeda ---------- */
 
-function CurrencyInput({ value, onChange, placeholder = 'R$ 0,00' }) {
+function CurrencyInput({ value, onChange, placeholder = '0,00' }) {
   const [display, setDisplay] = useState(value ? String(value) : '');
   useEffect(() => { setDisplay(value ? formatBRL(value).replace('R$', '').trim() : ''); }, [value]);
   function handleChange(e) {
@@ -899,7 +1037,7 @@ const NAV_ITEMS = [
   { id: 'configuracoes', label: 'Configurações', icon: Settings },
 ];
 
-function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNewTransaction, userName }) {
+function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNewTransaction, dropboxConnected, dropboxLastBackup, dropboxSyncError, onGoToSettings }) {
   return (
     <>
       {sidebarOpen && (
@@ -922,15 +1060,21 @@ function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNew
           </button>
         </div>
 
-        <div className="mx-6 mb-4 p-3 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'var(--primary-soft)' }}>
-          <div className="w-9 h-9 rounded-full flex items-center justify-center font-display font-semibold text-sm shrink-0" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>
-            {userName.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
-          </div>
+        <button onClick={onGoToSettings} className="mx-6 mb-4 p-3 rounded-xl flex items-center gap-2.5 text-left hover:bg-black/[0.03] transition-colors" style={{ backgroundColor: 'var(--primary-soft)' }}>
+          {dropboxConnected ? (
+            <Cloud size={16} color={dropboxSyncError ? 'var(--expense)' : 'var(--primary)'} className="shrink-0" />
+          ) : (
+            <EyeOff size={16} color="var(--text-soft)" className="shrink-0" />
+          )}
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{userName}</p>
-            <p className="text-[11px]" style={{ color: 'var(--text-soft)' }}>Conta Premium</p>
+            <p className="text-xs font-medium truncate" style={{ color: dropboxSyncError ? 'var(--expense)' : 'var(--text)' }}>
+              {!dropboxConnected ? 'Backup na nuvem desativado' : dropboxSyncError ? 'Falha no último backup' : 'Backup automático ativo'}
+            </p>
+            <p className="text-[11px]" style={{ color: 'var(--text-soft)' }}>
+              {dropboxConnected && dropboxLastBackup ? `Backup: ${relativeTime(dropboxLastBackup)}` : dropboxConnected ? 'Aguardando primeiro backup' : 'Toque para configurar'}
+            </p>
           </div>
-        </div>
+        </button>
 
         <nav className="flex-1 overflow-y-auto px-4 space-y-1">
           {NAV_ITEMS.map((item) => {
@@ -995,14 +1139,18 @@ function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   );
 }
 
-function Header({ userName, period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen }) {
+function Header({ userName, period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen, insights }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return new Set(JSON.parse(window.localStorage.getItem('cerne-dismissed-notifications-v1')) || []); } catch { return new Set(); }
+  });
+  const visibleInsights = insights.filter((n) => !dismissed.has(n.text));
+  function dismissNotification(text) {
+    const updated = new Set(dismissed); updated.add(text);
+    setDismissed(updated);
+    try { window.localStorage.setItem('cerne-dismissed-notifications-v1', JSON.stringify([...updated])); } catch { /* melhor esforço */ }
+  }
   const today = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const notifications = [
-    { text: 'A fatura do cartão Nubank fecha em 3 dias.', time: '2h atrás' },
-    { text: 'Você atingiu 91% da meta de reserva de emergência.', time: '1 dia atrás' },
-    { text: 'Conta de água vence amanhã.', time: '1 dia atrás' },
-  ];
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 px-4 md:px-6 lg:px-8 py-4 no-print" style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
       <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-black/5">
@@ -1027,16 +1175,28 @@ function Header({ userName, period, setPeriod, customRange, setCustomRange, sear
       <div className="relative">
         <button onClick={() => setNotifOpen(!notifOpen)} className="relative p-2.5 rounded-xl hover:bg-black/5 focus-ring">
           <Bell size={18} color="var(--text-soft)" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />
+          {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
         </button>
         {notifOpen && (
-          <div className="absolute right-0 mt-2 w-72 rounded-xl shadow-soft-lg p-2 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-            {notifications.map((n, i) => (
-              <div key={i} className="px-3 py-2.5 rounded-lg hover:bg-black/5">
-                <p className="text-sm" style={{ color: 'var(--text)' }}>{n.text}</p>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-soft)' }}>{n.time}</p>
+          <div className="absolute right-0 mt-2 w-72 rounded-xl shadow-soft-lg p-2 z-20 max-h-80 overflow-y-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+            {visibleInsights.length === 0 ? (
+              <div className="px-3 py-4 text-center">
+                <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
               </div>
-            ))}
+            ) : (
+              visibleInsights.map((n, i) => {
+                const Icon = n.icon || Info;
+                return (
+                  <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
+                    <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
+                    <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
+                    <button onClick={() => dismissNotification(n.text)} className="p-1 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
+                      <X size={13} color="var(--text-soft)" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
       </div>
@@ -1080,7 +1240,9 @@ function computeKPIs(period, customRange, mh, transactions, accounts, goals, cai
   const saldoDisponivel = accounts.reduce((s, a) => s + a.balance, 0);
   const patrimonio = mh.length ? mh[mh.length - 1].patrimonio : saldoDisponivel;
   const economiaAcumulada = caixinhas.reduce((s, c) => s + c.balance, 0) + goals.reduce((s, g) => s + g.current, 0);
-  const metaMensal = { current: mh.length ? thisMonthSaved(mh) : 0, target: monthlySavingsTarget > 0 ? monthlySavingsTarget : 0 };
+  const metaMensalCurrent = mh.length ? thisMonthSaved(mh) : 0;
+  const metaMensalTarget = monthlySavingsTarget > 0 ? monthlySavingsTarget : 0;
+  const metaMensal = { current: metaMensalCurrent, target: metaMensalTarget, percent: metaMensalTarget > 0 ? Math.min(100, (metaMensalCurrent / metaMensalTarget) * 100) : 0 };
 
   const last = mh[mh.length - 1];
   const prev = mh.length > 1 ? mh[mh.length - 2] : null;
@@ -1125,7 +1287,7 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
 }
 
 function KPIRow({ kpis }) {
-  const metaPercent = kpis.metaMensal.target > 0 ? Math.min(100, (kpis.metaMensal.current / kpis.metaMensal.target) * 100) : 0;
+  const metaPercent = kpis.metaMensal.percent;
   const cards = [
     { title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)' },
     { title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
@@ -1229,32 +1391,7 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
   );
 }
 
-/* ---------- Tabela de transações (compartilhada) ---------- */
-
-function TransactionRow({ tx, accounts, onEdit, onDelete }) {
-  const accName = accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida';
-  return (
-    <tr className="text-sm hover:bg-black/[0.02]">
-      <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
-      <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>{tx.description}</td>
-      <td className="py-3 pr-3"><CategoryBadge category={tx.category} /></td>
-      <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accName}</td>
-      <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
-      <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
-        {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
-      </td>
-      <td className="py-3 pr-3"><StatusBadge status={tx.status} /></td>
-      <td className="py-3 pr-1">
-        <div className="flex items-center gap-1">
-          <button onClick={() => onEdit(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Pencil size={14} color="var(--text-soft)" /></button>
-          <button onClick={() => onDelete(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={14} color="var(--expense)" /></button>
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-const TABLE_HEAD = ['Data', 'Descrição', 'Categoria', 'Conta', 'Forma de pagamento', 'Valor', 'Status', ''];
+/* ---------- Transações recentes (resumo no dashboard) ---------- */
 
 function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll }) {
   const recent = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
@@ -1263,18 +1400,31 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
         Transações recentes
       </SectionTitle>
-      <div className="overflow-x-auto -mx-1">
-        <table className="w-full min-w-[640px]">
-          <thead>
-            <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
-              {TABLE_HEAD.map((h, i) => <th key={i} className="pb-2 pr-3 font-medium">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody style={{ borderTop: '1px solid var(--border)' }}>
-            {recent.map((tx) => <TransactionRow key={tx.id} tx={tx} accounts={accounts} onEdit={onEdit} onDelete={onDelete} />)}
-          </tbody>
-        </table>
-      </div>
+      {recent.length === 0 ? (
+        <EmptyState icon={ArrowLeftRight} title="Nenhum lançamento ainda" description="Seus lançamentos mais recentes aparecem aqui." />
+      ) : (
+        <div className="space-y-1">
+          {recent.map((tx) => {
+            const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+            return (
+              <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
+                <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{tx.description}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                </div>
+                <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
+                  {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
+                </span>
+                <div className="hidden sm:flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => onEdit(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Pencil size={13} color="var(--text-soft)" /></button>
+                  <button onClick={() => onDelete(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--expense)" /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </Card>
   );
 }
@@ -1288,7 +1438,7 @@ function MonthSummaryPanel({ transactions, kpis }) {
   const maiorDespesa = despesasList.sort((a, b) => b.amount - a.amount)[0];
   const diasNoMes = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const mediaDiaria = kpis.despesas / diasNoMes;
-  const metaPercent = kpis.metaMensal.target > 0 ? Math.min(100, (kpis.metaMensal.current / kpis.metaMensal.target) * 100) : 0;
+  const metaPercent = kpis.metaMensal.percent;
   const rows = [
     { label: 'Maior receita', value: maiorReceita ? formatBRL(maiorReceita.amount) : '—', sub: maiorReceita?.description },
     { label: 'Maior despesa', value: maiorDespesa ? formatBRL(maiorDespesa.amount) : '—', sub: maiorDespesa?.description },
@@ -1447,7 +1597,7 @@ function GoalForm({ onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Ícone</FieldLabel>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {Object.entries(GOAL_ICONS).map(([key, Icon]) => (
               <button key={key} onClick={() => setForm({ ...form, icon: key })} className="p-2.5 rounded-xl" style={{ backgroundColor: form.icon === key ? 'var(--primary-soft)' : 'transparent', border: '1px solid var(--border)' }}>
                 <Icon size={16} color={form.icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
@@ -1487,11 +1637,12 @@ function FinancialCalendar({ cards, transactions }) {
 
   const events = [];
   cards.forEach((c) => {
-    events.push({ day: c.closingDay, label: `Fechamento fatura ${c.bank}`, type: 'fatura', amount: c.invoice });
+    const invoice = computeCardInvoice(c, transactions);
+    events.push({ day: c.closingDay, label: `Fechamento fatura ${c.bank}`, type: 'fatura', amount: invoice });
     const adjustedDue = getAdjustedDueDate(year, month, c.dueDay);
     if (adjustedDue.getMonth() === month) {
       const wasAdjusted = adjustedDue.getDate() !== Math.min(c.dueDay, new Date(year, month + 1, 0).getDate());
-      events.push({ day: adjustedDue.getDate(), label: `Vencimento fatura ${c.bank}${wasAdjusted ? ' (antecipado p/ dia útil)' : ''}`, type: 'vencimento', amount: c.invoice });
+      events.push({ day: adjustedDue.getDate(), label: `Vencimento fatura ${c.bank}${wasAdjusted ? ' (antecipado p/ dia útil)' : ''}`, type: 'vencimento', amount: invoice });
     }
   });
   transactions.filter((t) => t.status !== 'Pago' && isSameMonth(t.date, year, month)).forEach((t) => {
@@ -1545,8 +1696,9 @@ function FinancialCalendar({ cards, transactions }) {
 
 /* ---------- Cartões (preview) ---------- */
 
-function CreditCardVisual({ card, gradient }) {
-  const percentUsed = card.limit > 0 ? (card.used / card.limit) * 100 : 0;
+function CreditCardVisual({ card, transactions, gradient, onPayInvoice }) {
+  const invoice = useMemo(() => computeCardInvoice(card, transactions), [card, transactions]);
+  const percentUsed = card.limit > 0 ? (invoice / card.limit) * 100 : 0;
   const barColor = percentUsed > 85 ? 'var(--expense)' : percentUsed > 65 ? 'var(--alert)' : 'var(--income)';
   const nextDue = useMemo(() => getNextCardDueDate(card), [card.dueDay]);
   const dueWasAdjusted = nextDue.getDate() !== card.dueDay;
@@ -1560,15 +1712,26 @@ function CreditCardVisual({ card, gradient }) {
         </div>
         <CreditCard size={22} className="opacity-80" />
       </div>
-      <p className="text-xs opacity-70 mb-1">Fatura atual</p>
-      <p className="font-display text-2xl font-bold tabular-nums mb-4">{formatBRL(card.invoice)}</p>
+      <div className="flex items-end justify-between mb-4">
+        <div>
+          <p className="text-xs opacity-70 mb-1">Fatura atual</p>
+          <p className="font-display text-2xl font-bold tabular-nums">{formatBRL(invoice)}</p>
+        </div>
+        {invoice > 0 ? (
+          <button onClick={() => onPayInvoice(card, invoice)} className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors shrink-0">
+            Pagar fatura
+          </button>
+        ) : (
+          <span className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/10 flex items-center gap-1 shrink-0"><Check size={12} /> Em dia</span>
+        )}
+      </div>
       <div className="mb-2">
         <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden">
           <div className="h-full rounded-full" style={{ width: `${Math.min(100, percentUsed)}%`, backgroundColor: barColor }} />
         </div>
       </div>
       <div className="flex items-center justify-between text-xs opacity-80">
-        <span>{formatBRL(card.used)} de {formatBRL(card.limit)}</span>
+        <span>{formatBRL(invoice)} de {formatBRL(card.limit)}</span>
         <span>{percentUsed.toFixed(0)}% usado</span>
       </div>
       <div className="flex items-center justify-between text-xs opacity-70 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
@@ -1578,6 +1741,9 @@ function CreditCardVisual({ card, gradient }) {
           {dueWasAdjusted && <span className="block opacity-70">(dia {card.dueDay}, antecipado p/ dia útil)</span>}
         </span>
       </div>
+      {card.paidThroughDate && (
+        <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
+      )}
     </div>
   );
 }
@@ -1588,14 +1754,14 @@ const CARD_GRADIENTS = [
   'linear-gradient(135deg, #6D6558 0%, #3A362E 100%)',
 ];
 
-function CardsPreview({ cards, onSeeAll }) {
+function CardsPreview({ cards, transactions, onPayInvoice, onSeeAll }) {
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todos <ArrowRight size={12} /></button>}>
         Cartões de crédito
       </SectionTitle>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />)}
+        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} transactions={transactions} onPayInvoice={onPayInvoice} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />)}
       </div>
     </Card>
   );
@@ -1724,7 +1890,7 @@ function DashboardPage({ data, actions }) {
       <GoalsSection goals={data.goals} onAddFunds={actions.addGoalFunds} onDelete={actions.deleteGoal} onSeeAll={() => actions.goTo('metas')} compact />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <FinancialCalendar cards={data.cards} transactions={data.transactions} />
-        <CardsPreview cards={data.cards} onSeeAll={() => actions.goTo('cartoes')} />
+        <CardsPreview cards={data.cards} transactions={data.transactions} onPayInvoice={actions.payCardInvoice} onSeeAll={() => actions.goTo('cartoes')} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RecurringPreview recurring={data.recurring} onSeeAll={() => actions.goTo('recorrentes')} />
@@ -1739,11 +1905,11 @@ function DashboardPage({ data, actions }) {
    FORMULÁRIO DE TRANSAÇÃO
    ============================================================ */
 
-function TransactionForm({ initial, accounts, onSave, onClose }) {
+function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
   const [form, setForm] = useState(initial || {
     type: 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
     paymentMethod: 'Pix', date: new Date().toISOString().slice(0, 10), status: 'Pago',
-    isSalary: false, grossSalary: 0, dependents: 0,
+    isSalary: false, grossSalary: 0, dependents: 0, cardId: null,
   });
   const [errors, setErrors] = useState({});
 
@@ -1776,7 +1942,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
         <div className="flex gap-2">
           {['despesa', 'receita'].map((t) => (
             <button
-              key={t} onClick={() => setForm({ ...form, type: t, isSalary: t === 'receita' ? form.isSalary : false })}
+              key={t} onClick={() => setForm({ ...form, type: t, isSalary: t === 'receita' ? form.isSalary : false, cardId: t === 'receita' ? null : form.cardId })}
               className="flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors"
               style={{
                 borderColor: form.type === t ? (t === 'receita' ? 'var(--income)' : 'var(--expense)') : 'var(--border)',
@@ -1848,11 +2014,29 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           </div>
           <div>
             <FieldLabel error={errors.account}>Conta</FieldLabel>
-            <select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
+            <select value={form.account} disabled={!!form.cardId} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: form.cardId ? 0.6 : 1 }}>
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
             </select>
           </div>
         </div>
+        {form.type === 'despesa' && cards.length > 0 && (
+          <div>
+            <FieldLabel>Cartão (opcional)</FieldLabel>
+            <select
+              value={form.cardId || ''}
+              onChange={(e) => {
+                const cardId = e.target.value || null;
+                const card = cards.find((c) => c.id === cardId);
+                setForm({ ...form, cardId, account: card ? card.accountId : form.account, paymentMethod: card ? 'Cartão de crédito' : form.paymentMethod });
+              }}
+              className={inputClass} style={inputStyle}
+            >
+              <option value="">Nenhum (débito direto da conta)</option>
+              {cards.map((c) => <option key={c.id} value={c.id}>{c.bank} — {c.brand}</option>)}
+            </select>
+            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FieldLabel>Forma de pagamento</FieldLabel>
@@ -1878,8 +2062,11 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
 
 /* ---------- Modal: revisão da importação de fatura (CSV) ---------- */
 
-function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
+function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
+  const nubankCard = cards.find((c) => c.bank.toLowerCase().includes('nubank')) || cards[0];
   const nubankAccount = accounts.find((a) => a.bank.toLowerCase().includes('nubank')) || accounts[0];
+  const useCard = cards.length > 0;
+  const [targetCard, setTargetCard] = useState(nubankCard?.id || '');
   const [targetAccount, setTargetAccount] = useState(nubankAccount?.id || '');
   const [rows, setRows] = useState(parsed.purchases);
 
@@ -1895,6 +2082,7 @@ function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
   }
 
   function handleConfirm() {
+    const card = useCard ? cards.find((c) => c.id === targetCard) : null;
     const toImport = rows
       .filter((r) => r.include)
       .map((r) => ({
@@ -1903,7 +2091,8 @@ function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
         description: r.installment ? `${r.description} (parcela ${r.installment.current}/${r.installment.total})` : r.description,
         category: r.category,
         type: 'despesa',
-        account: targetAccount,
+        account: card ? card.accountId : targetAccount,
+        cardId: card ? card.id : null,
         paymentMethod: 'Cartão de crédito',
         amount: r.amount,
         status: 'Pago',
@@ -1944,10 +2133,19 @@ function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
         )}
 
         <div>
-          <FieldLabel>Lançar na conta</FieldLabel>
-          <select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-          </select>
+          <FieldLabel>{useCard ? 'Lançar no cartão' : 'Lançar na conta'}</FieldLabel>
+          {useCard ? (
+            <select value={targetCard} onChange={(e) => setTargetCard(e.target.value)} className={inputClass} style={inputStyle}>
+              {cards.map((c) => <option key={c.id} value={c.id}>{c.bank} — {c.brand}</option>)}
+            </select>
+          ) : (
+            <>
+              <select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
+              </select>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Você ainda não cadastrou um cartão — os lançamentos vão debitar essa conta diretamente. Cadastre o cartão em "Cartões" para a fatura ser calculada automaticamente.</p>
+            </>
+          )}
         </div>
 
         {rows.length === 0 ? (
@@ -1991,7 +2189,7 @@ function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
 
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleConfirm} disabled={selectedCount === 0 || !targetAccount}>Importar {selectedCount > 0 ? `(${selectedCount})` : ''}</Button>
+          <Button onClick={handleConfirm} disabled={selectedCount === 0 || (useCard ? !targetCard : !targetAccount)}>Importar {selectedCount > 0 ? `(${selectedCount})` : ''}</Button>
         </div>
       </div>
     </Modal>
@@ -2002,7 +2200,7 @@ function ImportReviewModal({ parsed, accounts, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ filterType, title, transactions, accounts, onAdd, onEdit, onDelete, onImport }) {
+function TransactionsPage({ filterType, title, transactions, accounts, cards, onAdd, onEdit, onDelete, onImport }) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
@@ -2181,9 +2379,9 @@ function TransactionsPage({ filterType, title, transactions, accounts, onAdd, on
         )}
       </Card>
 
-      {showForm && <TransactionForm accounts={accounts} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
-      {editing && <TransactionForm initial={editing} accounts={accounts} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} />}
-      {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
+      {showForm && <TransactionForm accounts={accounts} cards={cards} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
+      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} />}
+      {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} cards={cards} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
     </div>
   );
 }
@@ -2227,6 +2425,83 @@ function AccountForm({ onSave, onClose }) {
   );
 }
 
+/* ---------- Padrão reutilizável: "atualizar valor" com histórico e justificativa ---------- */
+/* Usado em caixinhas e vale-benefícios: um campo único atualiza o total. Se o novo valor for
+   menor que o atual, pede uma observação curta antes de confirmar (dinheiro foi usado/retirado). */
+
+function UpdateValueControl({ currentValue, onUpdate, label = 'Atualizar valor' }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(currentValue);
+  const [confirming, setConfirming] = useState(false);
+  const [note, setNote] = useState('');
+
+  function handleSubmit() {
+    if (value === currentValue) { setEditing(false); return; }
+    if (value < currentValue) setConfirming(true);
+    else { onUpdate(value, null); setEditing(false); }
+  }
+  function handleConfirmDecrease() {
+    onUpdate(value, note.trim() || null);
+    setConfirming(false); setEditing(false); setNote('');
+  }
+  function cancel() { setConfirming(false); setEditing(false); setNote(''); }
+
+  if (!editing) {
+    return (
+      <button onClick={() => { setValue(currentValue); setEditing(true); }} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+        <Pencil size={11} /> {label}
+      </button>
+    );
+  }
+  if (confirming) {
+    return (
+      <div className="space-y-2 mt-1.5">
+        <p className="text-xs flex items-start gap-1.5" style={{ color: 'var(--expense)' }}>
+          <AlertCircle size={13} className="mt-0.5 shrink-0" /> O novo valor é menor que o atual — o que aconteceu?
+        </p>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: usei parte pra um imprevisto" className={inputClass} style={inputStyle} />
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={handleConfirmDecrease}>Confirmar</Button>
+          <button onClick={cancel} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <CurrencyInput value={value} onChange={setValue} />
+      <Button size="sm" onClick={handleSubmit}>OK</Button>
+      <button onClick={cancel} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+    </div>
+  );
+}
+
+function BalanceHistoryLog({ history }) {
+  const [openNote, setOpenNote] = useState(null);
+  if (!history || history.length === 0) return null;
+  const items = [...history].reverse();
+  return (
+    <div className="space-y-1 mt-2 max-h-32 overflow-y-auto pr-1">
+      {items.map((h, i) => (
+        <div key={i} className="text-xs px-2 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
+          <div className="flex items-center justify-between gap-2">
+            <span style={{ color: 'var(--text-soft)' }}>{formatMonthYear(h.date)}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="tabular-nums font-medium" style={{ color: 'var(--text)' }}>{formatBRL(h.value)}</span>
+              {h.note && (
+                <button onClick={() => setOpenNote(openNote === i ? null : i)} className="p-0.5 rounded hover:bg-black/5 shrink-0">
+                  <MessageCircle size={12} color="var(--primary)" />
+                </button>
+              )}
+            </div>
+          </div>
+          {openNote === i && h.note && <p className="mt-1 italic" style={{ color: 'var(--text-soft)' }}>"{h.note}"</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CaixinhaForm({ accounts, onSave, onClose }) {
   const [form, setForm] = useState({ name: '', balance: 0, accountId: accounts[0]?.id || '' });
   const [error, setError] = useState('');
@@ -2256,10 +2531,10 @@ function CaixinhaForm({ accounts, onSave, onClose }) {
   );
 }
 
-function CaixinhaCard({ caixinha, accountName, onAddFunds, onDelete }) {
-  const [adding, setAdding] = useState(false);
-  const [amount, setAmount] = useState(0);
+function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const history = caixinha.history || [];
   return (
     <Card padding="p-4">
       <div className="flex items-start gap-3 mb-3">
@@ -2271,18 +2546,19 @@ function CaixinhaCard({ caixinha, accountName, onAddFunds, onDelete }) {
         <button onClick={() => setConfirmDelete(true)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--text-soft)" /></button>
       </div>
       <p className="font-display text-lg font-bold tabular-nums mb-2" style={{ color: 'var(--text)' }}>{formatBRL(caixinha.balance)}</p>
-      {!adding ? (
-        <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}><Plus size={12} /> Guardar valor</button>
-      ) : (
-        <div className="flex items-center gap-2">
-          <CurrencyInput value={amount} onChange={setAmount} />
-          <Button size="sm" onClick={() => { if (amount > 0) onAddFunds(caixinha, amount); setAdding(false); setAmount(0); }}>OK</Button>
-        </div>
+      <UpdateValueControl currentValue={caixinha.balance} onUpdate={(value, note) => onUpdateValue(caixinha, value, note)} />
+      {history.length > 0 && (
+        <>
+          <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-medium mt-2.5 flex items-center gap-1" style={{ color: 'var(--text-soft)' }}>
+            {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Histórico ({history.length})
+          </button>
+          {showHistory && <BalanceHistoryLog history={history} />}
+        </>
       )}
       {confirmDelete && (
         <ConfirmModal
           title="Excluir caixinha"
-          description={`Tem certeza que deseja excluir a caixinha "${caixinha.name}"? O saldo guardado nela (${formatBRL(caixinha.balance)}) não será somado de volta à conta automaticamente.`}
+          description={`Tem certeza que deseja excluir a caixinha "${caixinha.name}"? O saldo guardado nela (${formatBRL(caixinha.balance)}) volta para a conta "${accountName}".`}
           onConfirm={() => { onDelete(caixinha); setConfirmDelete(false); }}
           onClose={() => setConfirmDelete(false)}
         />
@@ -2349,7 +2625,7 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
   );
 }
 
-function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onDeleteCaixinha, onAddCaixinhaFunds }) {
+function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onDeleteCaixinha, onUpdateCaixinhaValue }) {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [showCaixinhaForm, setShowCaixinhaForm] = useState(false);
   const total = accounts.reduce((s, a) => s + a.balance, 0);
@@ -2381,7 +2657,7 @@ function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDelet
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {caixinhas.map((cx) => (
-              <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onAddFunds={onAddCaixinhaFunds} onDelete={onDeleteCaixinha} />
+              <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onUpdateValue={onUpdateCaixinhaValue} onDelete={onDeleteCaixinha} />
             ))}
           </div>
         )}
@@ -2397,14 +2673,15 @@ function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDelet
    PÁGINA: CARTÕES
    ============================================================ */
 
-function CardForm({ onSave, onClose }) {
-  const [form, setForm] = useState({ bank: '', brand: '', limit: 0, used: 0, invoice: 0, closingDay: 1, dueDay: 10 });
+function CardForm({ accounts, onSave, onClose }) {
+  const [form, setForm] = useState({ bank: '', brand: '', accountId: accounts[0]?.id || '', limit: 0, closingDay: 1, dueDay: 10, paidThroughDate: null });
   const [errors, setErrors] = useState({});
   const clampDay = (v) => Math.min(31, Math.max(1, Math.round(v) || 1));
   function validate() {
     const e = {};
     if (!form.bank.trim()) e.bank = 'Informe o banco';
     if (!form.limit || form.limit <= 0) e.limit = 'Informe um limite maior que zero';
+    if (!form.accountId) e.accountId = 'Selecione a conta que paga a fatura';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -2421,17 +2698,22 @@ function CardForm({ onSave, onClose }) {
             <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Mastercard" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <FieldLabel error={errors.limit}>Limite total</FieldLabel>
-            <CurrencyInput value={form.limit} onChange={(v) => setForm({ ...form, limit: v })} />
-          </div>
-          <div><FieldLabel>Fatura atual</FieldLabel><CurrencyInput value={form.invoice} onChange={(v) => setForm({ ...form, invoice: v, used: v })} /></div>
+        <div>
+          <FieldLabel error={errors.accountId}>Conta que paga a fatura</FieldLabel>
+          <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
+            {accounts.length === 0 && <option value="">Nenhuma conta cadastrada</option>}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
+          </select>
+        </div>
+        <div>
+          <FieldLabel error={errors.limit}>Limite total</FieldLabel>
+          <CurrencyInput value={form.limit} onChange={(v) => setForm({ ...form, limit: v })} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div><FieldLabel>Dia do fechamento</FieldLabel><input type="number" min={1} max={31} value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, closingDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
           <div><FieldLabel>Dia do vencimento</FieldLabel><input type="number" min={1} max={31} value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, dueDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
         </div>
+        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>A fatura é calculada automaticamente a partir dos lançamentos feitos neste cartão — não precisa informar um valor inicial.</p>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
           <Button onClick={() => { if (!validate()) return; onSave({ ...form, closingDay: clampDay(form.closingDay), dueDay: clampDay(form.dueDay) }); }}>Adicionar cartão</Button>
@@ -2466,29 +2748,26 @@ function BenefitForm({ onSave, onClose }) {
   );
 }
 
-function BenefitBalance({ label, icon: Icon, value, onAdjust }) {
-  const [adjusting, setAdjusting] = useState(false);
-  const [amount, setAmount] = useState(0);
+function BenefitBalance({ label, icon: Icon, value, history, onUpdate }) {
+  const [showHistory, setShowHistory] = useState(false);
   return (
     <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--bg)' }}>
       <div className="flex items-center gap-1.5 mb-1 text-xs" style={{ color: 'var(--text-soft)' }}><Icon size={13} /> {label}</div>
       <p className="font-display text-base font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(value)}</p>
-      {!adjusting ? (
-        <button onClick={() => setAdjusting(true)} className="text-[11px] font-medium mt-1.5" style={{ color: 'var(--primary)' }}>Ajustar saldo</button>
-      ) : (
-        <div className="mt-2 space-y-1.5">
-          <CurrencyInput value={amount} onChange={setAmount} />
-          <div className="flex gap-1.5">
-            <Button size="sm" variant="secondary" className="flex-1" onClick={() => { if (amount > 0) onAdjust(amount); setAdjusting(false); setAmount(0); }}>+ Recarga</Button>
-            <Button size="sm" variant="secondary" className="flex-1" onClick={() => { if (amount > 0) onAdjust(-amount); setAdjusting(false); setAmount(0); }}>− Uso</Button>
-          </div>
-        </div>
+      <UpdateValueControl currentValue={value} onUpdate={onUpdate} label="Atualizar saldo" />
+      {history && history.length > 0 && (
+        <>
+          <button onClick={() => setShowHistory((s) => !s)} className="text-[11px] font-medium mt-2 flex items-center gap-1" style={{ color: 'var(--text-soft)' }}>
+            {showHistory ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Histórico ({history.length})
+          </button>
+          {showHistory && <BalanceHistoryLog history={history} />}
+        </>
       )}
     </div>
   );
 }
 
-function BenefitCard({ benefit, onAdjust, onDelete }) {
+function BenefitCard({ benefit, onUpdate, onDelete }) {
   return (
     <Card padding="p-4">
       <div className="flex items-start gap-3 mb-3">
@@ -2500,14 +2779,14 @@ function BenefitCard({ benefit, onAdjust, onDelete }) {
         <button onClick={() => onDelete(benefit)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--text-soft)" /></button>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} onAdjust={(delta) => onAdjust(benefit, 'foodBalance', delta)} />
-        <BenefitBalance label="Transporte" icon={Car} value={benefit.mobilityBalance} onAdjust={(delta) => onAdjust(benefit, 'mobilityBalance', delta)} />
+        <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} history={benefit.foodHistory} onUpdate={(value, note) => onUpdate(benefit, 'foodBalance', value, note)} />
+        <BenefitBalance label="Transporte" icon={Car} value={benefit.mobilityBalance} history={benefit.mobilityHistory} onUpdate={(value, note) => onUpdate(benefit, 'mobilityBalance', value, note)} />
       </div>
     </Card>
   );
 }
 
-function CardsPage({ cards, onAdd, onDelete, benefits, onAddBenefit, onDeleteBenefit, onAdjustBenefit }) {
+function CardsPage({ cards, transactions, accounts, onAdd, onDelete, onPayInvoice, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteCard, setConfirmDeleteCard] = useState(null);
@@ -2518,7 +2797,7 @@ function CardsPage({ cards, onAdd, onDelete, benefits, onAddBenefit, onDeleteBen
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {cards.map((c, i) => (
           <div key={c.id} className="relative group">
-            <CreditCardVisual card={c} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
+            <CreditCardVisual card={c} transactions={transactions} onPayInvoice={onPayInvoice} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
             <button onClick={() => setConfirmDeleteCard(c)} className="absolute top-4 right-4 p-1.5 rounded-lg bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
               <Trash2 size={14} color="#fff" />
             </button>
@@ -2534,12 +2813,12 @@ function CardsPage({ cards, onAdd, onDelete, benefits, onAddBenefit, onDeleteBen
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {benefits.map((b) => (
-            <BenefitCard key={b.id} benefit={b} onAdjust={onAdjustBenefit} onDelete={() => setConfirmDeleteBenefit(b)} />
+            <BenefitCard key={b.id} benefit={b} onUpdate={onUpdateBenefit} onDelete={() => setConfirmDeleteBenefit(b)} />
           ))}
         </div>
       )}
 
-      {showForm && <CardForm onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
+      {showForm && <CardForm accounts={accounts} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
       {showBenefitForm && <BenefitForm onSave={(f) => { onAddBenefit(f); setShowBenefitForm(false); }} onClose={() => setShowBenefitForm(false)} />}
       {confirmDeleteCard && (
         <ConfirmModal
@@ -2568,6 +2847,7 @@ function CardsPage({ cards, onAdd, onDelete, benefits, onAddBenefit, onDeleteBen
 function InvestmentForm({ initial, onSave, onClose }) {
   const [form, setForm] = useState(initial || { name: '', category: INVESTMENT_CATEGORY_NAMES[0], invested: 0, currentValue: 0 });
   const [error, setError] = useState('');
+  const [currentTouched, setCurrentTouched] = useState(!!initial);
   return (
     <Modal title={initial ? 'Editar investimento' : 'Novo investimento'} onClose={onClose}>
       <div className="space-y-4">
@@ -2582,10 +2862,18 @@ function InvestmentForm({ initial, onSave, onClose }) {
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><FieldLabel>Valor investido</FieldLabel><CurrencyInput value={form.invested} onChange={(v) => setForm({ ...form, invested: v })} /></div>
-          <div><FieldLabel>Valor atual</FieldLabel><CurrencyInput value={form.currentValue} onChange={(v) => setForm({ ...form, currentValue: v })} /></div>
+          <div>
+            <FieldLabel>Valor investido</FieldLabel>
+            <CurrencyInput value={form.invested} onChange={(v) => setForm({ ...form, invested: v, currentValue: currentTouched ? form.currentValue : v })} />
+          </div>
+          <div>
+            <FieldLabel>Valor atual</FieldLabel>
+            <CurrencyInput value={form.currentValue} onChange={(v) => { setCurrentTouched(true); setForm({ ...form, currentValue: v }); }} />
+          </div>
         </div>
-        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>A rentabilidade é calculada automaticamente a partir da diferença entre esses dois valores.</p>
+        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+          {currentTouched ? 'A rentabilidade é calculada automaticamente a partir da diferença entre esses dois valores.' : 'Valor atual acompanha o investido até você ajustá-lo — informe o valor de mercado de hoje se for diferente.'}
+        </p>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
           <Button onClick={() => { if (!form.name.trim()) { setError('Informe o nome'); return; } onSave(form); }}>{initial ? 'Salvar' : 'Adicionar'}</Button>
@@ -2797,25 +3085,30 @@ function RecurringExpensesPage({ recurring, accounts, onAdd, onDelete, onLaunchN
             {recurring.map((r) => {
               const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
               return (
-                <div key={r.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-black/[0.02]">
+                <div key={r.id} className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 p-3 rounded-xl hover:bg-black/[0.02]">
                   <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
+                  <div className="flex-1 min-w-[140px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
+                      <span className="sm:hidden text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <CategoryBadge category={r.category} />
                       <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
                     </div>
                   </div>
-                  <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
-                  <button
-                    onClick={() => onLaunchNow(r, accounts[0]?.id)}
-                    disabled={!accounts[0]}
-                    className="text-xs font-medium shrink-0 px-2.5 py-1.5 rounded-lg"
-                    style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
-                  >
-                    Lançar agora
-                  </button>
-                  <button onClick={() => setConfirmDelete(r)} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0"><Trash2 size={14} color="var(--text-soft)" /></button>
+                  <span className="hidden sm:inline text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      onClick={() => onLaunchNow(r, accounts[0]?.id)}
+                      disabled={!accounts[0]}
+                      className="text-xs font-medium shrink-0 px-2.5 py-1.5 rounded-lg"
+                      style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
+                    >
+                      Lançar agora
+                    </button>
+                    <button onClick={() => setConfirmDelete(r)} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0"><Trash2 size={14} color="var(--text-soft)" /></button>
+                  </div>
                 </div>
               );
             })}
@@ -2890,9 +3183,10 @@ function ToggleSwitch({ checked, onChange }) {
   );
 }
 
-function SettingsPage({ userName, settings, onChangeName, onChangeSettings, onReset, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox }) {
+function SettingsPage({ userName, settings, onChangeName, onChangeSettings, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox }) {
   const [name, setName] = useState(userName);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
   const dropboxReady = isDropboxConfigured();
   return (
@@ -2913,20 +3207,37 @@ function SettingsPage({ userName, settings, onChangeName, onChangeSettings, onRe
 
       <Card>
         <SectionTitle>Aparência</SectionTitle>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Modo claro</p>
-              <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Tema atual da aplicação</p>
-            </div>
-            <Badge color="var(--primary)" soft="var(--primary-soft)">Ativo</Badge>
-          </div>
-          <div className="flex items-center justify-between opacity-50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {settings.theme === 'dark' ? <Moon size={18} color="var(--text-soft)" /> : <Sun size={18} color="var(--text-soft)" />}
             <div>
               <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Modo escuro</p>
-              <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Em breve</p>
+              <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{settings.theme === 'dark' ? 'Ativado' : 'Desativado'}</p>
             </div>
-            <ToggleSwitch checked={false} onChange={() => {}} />
+          </div>
+          <ToggleSwitch checked={settings.theme === 'dark'} onChange={(v) => onChangeSettings({ ...settings, theme: v ? 'dark' : 'light' })} />
+        </div>
+        <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
+          <p className="text-sm font-medium mb-1" style={{ color: 'var(--text)' }}>Cor de destaque</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-soft)' }}>Vale tanto para o modo claro quanto para o escuro.</p>
+          <div className="flex flex-wrap gap-2.5">
+            {Object.entries(COLOR_THEMES).map(([key, t]) => {
+              const selected = (settings.colorTheme || 'default') === key;
+              const swatch = settings.theme === 'dark' ? t.dark : t.light;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onChangeSettings({ ...settings, colorTheme: key })}
+                  title={t.label}
+                  aria-label={t.label}
+                  className="w-9 h-9 rounded-full flex items-center justify-center focus-ring transition-transform hover:scale-105"
+                  style={{ backgroundColor: swatch, boxShadow: selected ? `0 0 0 2px var(--card), 0 0 0 4px ${swatch}` : '0 0 0 2px var(--card)' }}
+                >
+                  {selected && <Check size={15} color="#fff" strokeWidth={3} />}
+                </button>
+              );
+            })}
           </div>
         </div>
       </Card>
@@ -3001,8 +3312,11 @@ function SettingsPage({ userName, settings, onChangeName, onChangeSettings, onRe
 
       <Card>
         <SectionTitle>Dados</SectionTitle>
-        <p className="text-sm mb-4" style={{ color: 'var(--text-soft)' }}>Seus dados ficam salvos automaticamente neste aplicativo. Você pode restaurar os dados de exemplo a qualquer momento.</p>
-        <Button variant="secondary" onClick={() => setShowConfirmReset(true)}>Restaurar dados de exemplo</Button>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-soft)' }}>Seus dados ficam salvos automaticamente neste aplicativo.</p>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => setShowConfirmReset(true)}>Restaurar dados de exemplo</Button>
+          <Button variant="secondary" onClick={() => setShowConfirmClear(true)}>Limpar dados</Button>
+        </div>
       </Card>
 
       {showConfirmReset && (
@@ -3011,6 +3325,14 @@ function SettingsPage({ userName, settings, onChangeName, onChangeSettings, onRe
           description="Isso substituirá suas transações, contas, cartões, metas, caixinhas e despesas recorrentes atuais pelos dados de demonstração. Essa ação não pode ser desfeita."
           onConfirm={onReset}
           onClose={() => setShowConfirmReset(false)}
+        />
+      )}
+      {showConfirmClear && (
+        <ConfirmModal
+          title="Limpar todos os dados"
+          description="Isso apaga permanentemente todas as suas transações, contas, cartões, metas, caixinhas, vale-benefícios, investimentos e despesas recorrentes. Não é possível desfazer — se tiver backup no Dropbox, ele continua lá."
+          onConfirm={() => { onClearData(); setShowConfirmClear(false); }}
+          onClose={() => setShowConfirmClear(false)}
         />
       )}
       {showConfirmRestore && (
@@ -3037,7 +3359,15 @@ export default function App() {
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
   const [search, setSearch] = useState('');
   const [userName, setUserName] = useState('Thiago Coura');
-  const [settings, setSettings] = useState({ notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500 });
+  const [settings, setSettings] = useState(() => {
+    // Lê o tema direto do localStorage de forma síncrona, pra não piscar claro→escuro na abertura.
+    const defaults = { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default' };
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed?.settings ? { ...defaults, ...parsed.settings } : defaults;
+    } catch { return defaults; }
+  });
 
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -3056,6 +3386,11 @@ export default function App() {
   const [dropboxBusy, setDropboxBusy] = useState(false);
   const [dropboxLastBackup, setDropboxLastBackup] = useState(null);
   const [dropboxSyncError, setDropboxSyncError] = useState(false);
+  const [lastModified, setLastModified] = useState(null);
+  const [syncConflict, setSyncConflict] = useState(null);
+  const dismissedSyncRef = useRef(null);
+  const lastModifiedRef = useRef(null);
+  useEffect(() => { lastModifiedRef.current = lastModified; }, [lastModified]);
 
   function applyLoadedData(loaded) {
     setTransactions(loaded.transactions || buildInitialTransactions());
@@ -3067,7 +3402,37 @@ export default function App() {
     setBenefits(loaded.benefits || initialBenefits);
     setInvestments(loaded.investments || initialInvestments);
     setUserName(loaded.userName || 'Thiago Coura');
-    setSettings(loaded.settings || { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500 });
+    setSettings(loaded.settings || { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default' });
+    setLastModified(loaded.lastModified || null);
+  }
+
+  // Confere se existe um backup mais novo no Dropbox do que os dados deste navegador — cobre o
+  // caso de ter mexido em outro aparelho e esquecido de esperar sincronizar. Não substitui nada
+  // sozinho: só avisa e deixa você escolher.
+  async function checkForNewerBackup() {
+    if (!isDropboxConnected()) return;
+    try {
+      const remote = await downloadLatestBackup();
+      if (!remote || !remote.data.lastModified) return;
+      if (remote.filename === dismissedSyncRef.current) return;
+      const localTime = lastModifiedRef.current;
+      if (!localTime || remote.data.lastModified > localTime) {
+        setSyncConflict({ data: remote.data, filename: remote.filename, date: new Date(remote.data.lastModified) });
+      }
+    } catch (e) { /* checagem em segundo plano — falha silenciosa, tenta de novo depois */ }
+  }
+  function resolveSyncUseRemote() {
+    applyLoadedData(syncConflict.data);
+    saveAppData(syncConflict.data);
+    addToast('Dados atualizados com a versão mais recente do Dropbox.');
+    setSyncConflict(null);
+  }
+  function resolveSyncKeepLocal() {
+    dismissedSyncRef.current = syncConflict.filename;
+    // Reenvia os dados daqui para o Dropbox, já que ficaram mais atuais que os de lá.
+    uploadBackup(JSON.stringify({ transactions, accounts, cards, goals, caixinhas, recurring, benefits, investments, userName, settings, lastModified }))
+      .then(() => setDropboxLastBackup(new Date())).catch(() => {});
+    setSyncConflict(null);
   }
 
   useEffect(() => {
@@ -3076,6 +3441,7 @@ export default function App() {
       const redirectResult = await handleDropboxRedirect().catch((e) => ({ status: 'error', message: e?.message }));
       if (redirectResult.status === 'connected') {
         setDropboxConnected(true);
+        setDropboxSyncError(false);
         addToastSafe('Dropbox conectado com sucesso.');
       } else if (redirectResult.status === 'error') {
         addToastSafe(`Não foi possível conectar ao Dropbox: ${redirectResult.message || 'tente novamente.'}`, 'error');
@@ -3084,6 +3450,7 @@ export default function App() {
       const loaded = await loadAppData();
       if (loaded) {
         applyLoadedData(loaded);
+        checkForNewerBackup();
       } else if (isDropboxConnected()) {
         // Sem dados neste navegador, mas com Dropbox conectado: tenta puxar o backup mais recente
         // (cenário de "abrir em outro aparelho e continuar de onde parou").
@@ -3119,6 +3486,22 @@ export default function App() {
     function addToastSafe(message, type = 'success') { setToasts((prev) => [...prev, { id: uid(), message, type }]); }
   }, []);
 
+  // Reconfere periodicamente (e sempre que a aba volta a ficar em foco) se apareceu um backup
+  // mais novo no Dropbox — cobre o caso de ter mexido em outro aparelho enquanto este ficou aberto.
+  useEffect(() => {
+    const interval = setInterval(() => checkForNewerBackup(), 3 * 60 * 1000);
+    function onVisible() { if (document.visibilityState === 'visible') checkForNewerBackup(); }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
+  // Mantém a cor da barra de status do celular (PWA) combinando com o tema atual.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const themeInfo = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.default;
+    if (meta) meta.setAttribute('content', settings.theme === 'dark' ? '#1C1B18' : themeInfo.light);
+  }, [settings.theme, settings.colorTheme]);
+
   function addToast(message, type = 'success') {
     const id = uid();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -3126,6 +3509,7 @@ export default function App() {
   }
 
   function persist(partial) {
+    const now = new Date().toISOString();
     const fullState = {
       transactions: partial.transactions ?? transactions,
       accounts: partial.accounts ?? accounts,
@@ -3137,7 +3521,9 @@ export default function App() {
       investments: partial.investments ?? investments,
       userName: partial.userName ?? userName,
       settings: partial.settings ?? settings,
+      lastModified: now,
     };
+    setLastModified(now);
     saveAppData(fullState);
     scheduleBackup(() => fullState, (err, info) => {
       if (err) { setDropboxSyncError(true); }
@@ -3152,6 +3538,7 @@ export default function App() {
     disconnectDropbox();
     setDropboxConnected(false);
     setDropboxLastBackup(null);
+    setDropboxSyncError(false);
     addToast('Dropbox desconectado. Seus dados continuam salvos neste navegador.');
   }
   async function backupNowToDropbox() {
@@ -3246,19 +3633,31 @@ export default function App() {
 
   /* ---- caixinhas ---- */
   function addCaixinha(form) {
-    const updated = [...caixinhas, { ...form, id: uid() }];
-    setCaixinhas(updated); persist({ caixinhas: updated });
+    const today = new Date().toISOString().slice(0, 10);
+    const history = form.balance > 0 ? [{ date: today, value: form.balance, note: null }] : [];
+    const updated = [...caixinhas, { ...form, id: uid(), history }];
+    const updatedAccounts = applyBalanceDelta(accounts, form.accountId, -(form.balance || 0));
+    setCaixinhas(updated); setAccounts(updatedAccounts); persist({ caixinhas: updated, accounts: updatedAccounts });
     addToast('Caixinha criada.');
   }
   function deleteCaixinha(cx) {
     const updated = caixinhas.filter((c) => c.id !== cx.id);
-    setCaixinhas(updated); persist({ caixinhas: updated });
-    addToast('Caixinha removida.');
+    // O saldo guardado volta a ficar disponível na conta de origem.
+    const updatedAccounts = applyBalanceDelta(accounts, cx.accountId, cx.balance);
+    setCaixinhas(updated); setAccounts(updatedAccounts); persist({ caixinhas: updated, accounts: updatedAccounts });
+    addToast('Caixinha removida. O saldo voltou para a conta de origem.');
   }
-  function addCaixinhaFunds(cx, amount) {
-    const updated = caixinhas.map((c) => (c.id === cx.id ? { ...c, balance: c.balance + amount } : c));
-    setCaixinhas(updated); persist({ caixinhas: updated });
-    addToast(`${formatBRL(amount)} guardado(s) em "${cx.name}".`);
+  // Atualiza o valor total da caixinha (não só soma). A diferença é movida de/para a conta
+  // vinculada, e cada atualização fica registrada no histórico (com a observação, se houve uma).
+  function updateCaixinhaValue(cx, newValue, note) {
+    const delta = newValue - cx.balance;
+    const today = new Date().toISOString().slice(0, 10);
+    const updated = caixinhas.map((c) => (c.id === cx.id
+      ? { ...c, balance: newValue, history: [...(c.history || []), { date: today, value: newValue, note }] }
+      : c));
+    const updatedAccounts = applyBalanceDelta(accounts, cx.accountId, -delta);
+    setCaixinhas(updated); setAccounts(updatedAccounts); persist({ caixinhas: updated, accounts: updatedAccounts });
+    addToast(delta >= 0 ? `Caixinha "${cx.name}" atualizada: +${formatBRL(delta)}.` : `Caixinha "${cx.name}" atualizada: ${formatBRL(delta)}.`);
   }
 
   /* ---- cartões ---- */
@@ -3272,6 +3671,23 @@ export default function App() {
     setCards(updated); persist({ cards: updated });
     addToast('Cartão removido.');
   }
+  // Pagar a fatura é um lançamento de verdade (despesa na conta vinculada) — é isso que faz o
+  // saldo da conta cair e "zera" a fatura calculada do cartão a partir de hoje.
+  // Atualiza transações + contas + cartões juntos, numa única persistência (evita persistir um
+  // "transactions" desatualizado por causa da closure, se isso fosse composto com addTransaction).
+  function payCardInvoice(card, amount) {
+    const today = new Date().toISOString().slice(0, 10);
+    const newTx = {
+      id: uid(), description: `Fatura ${card.bank}`, amount, category: 'Outros', type: 'despesa',
+      account: card.accountId, paymentMethod: 'Transferência', date: today, status: 'Pago',
+    };
+    const updatedTransactions = [newTx, ...transactions];
+    const updatedAccounts = reapplyAccountEffect(accounts, null, newTx);
+    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: today } : c));
+    setTransactions(updatedTransactions); setAccounts(updatedAccounts); setCards(updatedCards);
+    persist({ transactions: updatedTransactions, accounts: updatedAccounts, cards: updatedCards });
+    addToast(`Fatura do ${card.bank} paga (${formatBRL(amount)}).`);
+  }
 
   /* ---- vale-benefícios ---- */
   function addBenefit(form) {
@@ -3284,10 +3700,15 @@ export default function App() {
     setBenefits(updated); persist({ benefits: updated });
     addToast('Vale-benefícios removido.');
   }
-  function adjustBenefit(b, field, delta) {
-    const updated = benefits.map((x) => (x.id === b.id ? { ...x, [field]: Math.max(0, x[field] + delta) } : x));
+  function updateBenefit(b, field, newValue, note) {
+    const delta = newValue - b[field];
+    const historyField = field === 'foodBalance' ? 'foodHistory' : 'mobilityHistory';
+    const today = new Date().toISOString().slice(0, 10);
+    const updated = benefits.map((x) => (x.id === b.id
+      ? { ...x, [field]: newValue, [historyField]: [...(x[historyField] || []), { date: today, value: newValue, note }] }
+      : x));
     setBenefits(updated); persist({ benefits: updated });
-    addToast(delta > 0 ? `${formatBRL(delta)} recarregado(s).` : `${formatBRL(Math.abs(delta))} registrado(s) como uso.`);
+    addToast(delta >= 0 ? `Saldo atualizado: +${formatBRL(delta)}.` : `Saldo atualizado: ${formatBRL(delta)}.`);
   }
 
   /* ---- metas ---- */
@@ -3361,6 +3782,16 @@ export default function App() {
     persist({ transactions: t, accounts: initialAccounts, cards: initialCards, goals: initialGoals, caixinhas: initialCaixinhas, recurring: initialRecurring, benefits: initialBenefits, investments: initialInvestments });
     addToast('Dados de exemplo restaurados.');
   }
+  function clearAllData() {
+    const empty = { transactions: [], accounts: [], cards: [], goals: [], caixinhas: [], recurring: [], benefits: [], investments: [] };
+    setTransactions(empty.transactions); setAccounts(empty.accounts); setCards(empty.cards);
+    setGoals(empty.goals); setCaixinhas(empty.caixinhas); setRecurring(empty.recurring); setBenefits(empty.benefits); setInvestments(empty.investments);
+    persist(empty);
+    addToast('Todos os dados foram apagados.');
+  }
+
+  const colorThemeClass = settings.colorTheme && settings.colorTheme !== 'default' ? ` theme-${settings.colorTheme}` : '';
+  const rootClassSuffix = `${colorThemeClass}${settings.theme === 'dark' ? ' dark' : ''}`;
 
   const investmentsTotal = useMemo(() => investments.reduce((s, i) => s + i.currentValue, 0), [investments]);
   const realMonthlyHistory = useMemo(
@@ -3378,7 +3809,7 @@ export default function App() {
 
   const insights = useMemo(() => {
     if (isLoading) return [];
-    return generateInsights({ transactions, goals, monthlyHistory: realMonthlyHistory, accounts, categoryComparison: realCategoryComparison });
+    return generateInsights({ transactions, goals, monthlyHistory: realMonthlyHistory, accounts, cards, categoryComparison: realCategoryComparison });
   }, [isLoading, transactions, goals, accounts, realMonthlyHistory, realCategoryComparison]);
 
   const filteredForSearch = useMemo(() => {
@@ -3393,12 +3824,12 @@ export default function App() {
   };
   const actions = {
     goTo, editTransaction, deleteTransaction, addGoalFunds, deleteGoal,
-    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction,
+    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction, payCardInvoice,
   };
 
   if (isLoading) {
     return (
-      <div className="cerne-root flex h-screen" style={{ backgroundColor: 'var(--bg)' }}>
+      <div className={`cerne-root flex h-screen${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)' }}>
         <style>{GLOBAL_STYLES}</style>
         <LoadingScreen />
       </div>
@@ -3406,12 +3837,12 @@ export default function App() {
   }
 
   return (
-    <div className="cerne-root flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg)' }}>
+    <div className={`cerne-root flex h-screen overflow-hidden${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)' }}>
       <style>{GLOBAL_STYLES}</style>
-      <Sidebar activePage={activePage} setActivePage={goTo} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} onNewTransaction={() => setModal({ type: 'newTransaction' })} userName={userName} />
+      <Sidebar activePage={activePage} setActivePage={goTo} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} onNewTransaction={() => setModal({ type: 'newTransaction' })} dropboxConnected={dropboxConnected} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError} onGoToSettings={() => goTo('configuracoes')} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header userName={userName} period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} />
+        <Header userName={userName} period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
         {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
 
         <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 print-area">
@@ -3423,13 +3854,12 @@ export default function App() {
               ) : (
                 <div className="space-y-2">
                   {filteredForSearch.slice(0, 10).map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between text-sm p-2.5 rounded-xl hover:bg-black/[0.02]">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</span>
-                        <span className="truncate" style={{ color: 'var(--text)' }}>{tx.description}</span>
-                        <CategoryBadge category={tx.category} />
+                    <div key={tx.id} className="flex items-center justify-between gap-3 text-sm p-2.5 rounded-xl hover:bg-black/[0.02]">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="shrink-0" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                        <span className="truncate min-w-0 flex-1" style={{ color: 'var(--text)' }}>{tx.description}</span>
                       </div>
-                      <span className="tabular-nums font-medium" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{formatBRL(tx.amount)}</span>
+                      <span className="tabular-nums font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{formatBRL(tx.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -3438,18 +3868,18 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
-              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
-              {activePage === 'despesas' && <TransactionsPage filterType="despesa" title="Despesas" transactions={transactions} accounts={accounts} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
-              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onAddCaixinhaFunds={addCaixinhaFunds} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} onAdd={addCard} onDelete={deleteCard} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onAdjustBenefit={adjustBenefit} />}
+              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'despesas' && <TransactionsPage filterType="despesa" title="Despesas" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} onAdd={addCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} onAdd={addRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
               {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
-                  userName={userName} settings={settings} onChangeName={changeName} onChangeSettings={changeSettings} onReset={resetToSampleData}
+                  userName={userName} settings={settings} onChangeName={changeName} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
                   dropboxConnected={dropboxConnected} dropboxBusy={dropboxBusy} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError}
                   onConnectDropbox={connectDropbox} onDisconnectDropbox={disconnectDropboxAccount}
                   onBackupNow={backupNowToDropbox} onRestoreFromDropbox={restoreFromDropbox}
@@ -3461,7 +3891,10 @@ export default function App() {
       </div>
 
       {modal?.type === 'newTransaction' && (
-        <TransactionForm accounts={accounts} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+        <TransactionForm accounts={accounts} cards={cards} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+      )}
+      {syncConflict && (
+        <SyncConflictModal date={syncConflict.date} onUseRemote={resolveSyncUseRemote} onKeepLocal={resolveSyncKeepLocal} />
       )}
 
       <ToastContainer toasts={toasts} />
