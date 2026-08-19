@@ -5,7 +5,7 @@
 
 // Preencha com o "App key" do seu app no Dropbox App Console (dropbox.com/developers/apps).
 // Não é segredo — pode ficar no código do front-end tranquilamente.
-export const DROPBOX_APP_KEY = 'qmc8z2n56lgnxuj';
+export const DROPBOX_APP_KEY = 'COLE_AQUI_SEU_APP_KEY';
 
 const TOKEN_KEY = 'cerne-dropbox-tokens-v1';
 const VERIFIER_KEY = 'cerne-dropbox-pkce-verifier';

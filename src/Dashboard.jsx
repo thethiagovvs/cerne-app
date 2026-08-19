@@ -152,8 +152,14 @@ const CATEGORY_NAMES = Object.keys(CATEGORIES);
 
 const ACCOUNTS_ICONS = { 'Conta Corrente': Wallet, 'Poupança': PiggyBank };
 
-const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Transferência', 'Boleto'];
+const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Transferência', 'Boleto', 'Vale-benefícios'];
 const STATUS_OPTIONS = ['Pago', 'Pendente', 'Agendado'];
+// O rótulo "Pago" não faz muito sentido pra uma receita (você recebe, não paga) — o valor
+// gravado continua sendo 'Pago' (é o que toda a lógica de saldo/fatura usa), só o texto muda.
+function statusLabel(status, type) {
+  if (status === 'Pago' && type === 'receita') return 'Recebido';
+  return status;
+}
 
 /* ---------- Helpers ---------- */
 
@@ -233,6 +239,29 @@ function reapplyAccountEffect(accountsList, oldTx, newTx) {
   return updated;
 }
 
+// Uma despesa lançada num vale-benefícios (Alimentação/Transporte) desconta o saldo daquele
+// benefício na hora — diferente do cartão de crédito, o vale já é um dinheiro pré-carregado,
+// não existe "fatura" pra pagar depois.
+function benefitBalanceEffect(t) {
+  if (!t || t.type !== 'despesa' || !t.benefitId || !t.benefitType) return 0;
+  return t.amount;
+}
+function applyBenefitDelta(benefitsList, benefitId, field, delta) {
+  if (!benefitId || !field || !delta) return benefitsList;
+  const historyField = field === 'foodBalance' ? 'foodHistory' : 'mobilityHistory';
+  return benefitsList.map((b) => {
+    if (b.id !== benefitId) return b;
+    const newValue = Math.max(0, (b[field] || 0) - delta);
+    return { ...b, [field]: newValue };
+  });
+}
+function reapplyBenefitEffect(benefitsList, oldTx, newTx) {
+  let updated = benefitsList;
+  if (oldTx && benefitBalanceEffect(oldTx)) updated = applyBenefitDelta(updated, oldTx.benefitId, oldTx.benefitType, -benefitBalanceEffect(oldTx));
+  if (newTx && benefitBalanceEffect(newTx)) updated = applyBenefitDelta(updated, newTx.benefitId, newTx.benefitType, benefitBalanceEffect(newTx));
+  return updated;
+}
+
 // Histórico mensal real (receitas/despesas pagas por mês + patrimônio reconstruído a partir do
 // saldo atual das contas, "desfazendo" o líquido de cada mês para trás).
 function computeMonthlyHistory(transactions, accounts, investmentsTotal, monthsBack = 12) {
@@ -274,9 +303,15 @@ function computeCategoryTotals(transactions, year, month) {
 // Fatura de um cartão: soma de tudo que foi lançado nele (despesas "Pago" com esse cardId)
 // desde o último pagamento registrado. Não é mais um número solto — é sempre o espelho real
 // dos lançamentos, então trocar o cartão de uma despesa atualiza a fatura na hora.
-function computeCardInvoice(card, transactions) {
+// A fatura "atual" (aberta) é tudo que foi lançado no cartão desde o último pagamento até o
+// vencimento em aberto mais próximo — nunca inclui parcelas futuras de uma compra parcelada,
+// que só entram na fatura quando chegar a vez delas (ou se forem antecipadas).
+function computeCardInvoice(card, transactions, referenceDate = new Date()) {
+  const cutoff = ymd(getNextCardDueDate(card, referenceDate));
   return transactions
-    .filter((t) => t.cardId === card.id && t.status === 'Pago' && t.type === 'despesa' && (!card.paidThroughDate || t.date > card.paidThroughDate))
+    .filter((t) => t.cardId === card.id && t.status === 'Pago' && t.type === 'despesa'
+      && (!card.paidThroughDate || t.date > card.paidThroughDate)
+      && t.date <= cutoff)
     .reduce((s, t) => s + t.amount, 0);
 }
 
@@ -333,6 +368,19 @@ function getNextCardDueDate(card, referenceDate = new Date()) {
   let due = getAdjustedDueDate(ref.getFullYear(), ref.getMonth(), card.dueDay);
   if (due < ref) due = getAdjustedDueDate(ref.getFullYear(), ref.getMonth() + 1, card.dueDay);
   return due;
+}
+
+// Data de vencimento da fatura em que uma parcela cai, dado o dia da compra e o dia de
+// fechamento do cartão: compras até o dia do fechamento entram na fatura que fecha nesse mês;
+// compras depois do fechamento só entram na fatura do mês seguinte. Cada parcela seguinte
+// (offsetMonths = 0, 1, 2...) empurra o fechamento um mês pra frente a partir daí.
+function getInstallmentDueDate(card, purchaseDate, offsetMonths) {
+  let closingMonth = purchaseDate.getMonth() + (purchaseDate.getDate() > card.closingDay ? 1 : 0) + offsetMonths;
+  const closingRef = new Date(purchaseDate.getFullYear(), closingMonth, 1);
+  // Se o dia do vencimento (numericamente) vem antes do dia do fechamento, o vencimento cai
+  // no mês seguinte ao fechamento (ex: fecha dia 22, vence dia 5 → vence no mês seguinte).
+  const dueMonthOffset = card.dueDay < card.closingDay ? 1 : 0;
+  return getAdjustedDueDate(closingRef.getFullYear(), closingRef.getMonth() + dueMonthOffset, card.dueDay);
 }
 
 /* ---------- Cálculo de salário líquido CLT (INSS + IRRF, tabelas 2026) ---------- */
@@ -827,14 +875,14 @@ function CategoryBadge({ category }) {
   return <Badge color={cat.color} soft={cat.soft} icon={cat.icon}>{category}</Badge>;
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, type }) {
   const map = {
     'Pago': { color: 'var(--income)', soft: 'var(--income-soft)' },
     'Pendente': { color: 'var(--alert)', soft: 'var(--alert-soft)' },
-    'Agendado': { color: 'var(--text-soft)', soft: '#EEEDE8' },
+    'Agendado': { color: 'var(--text-soft)', soft: 'var(--bg)' },
   };
   const s = map[status] || map['Pendente'];
-  return <Badge color={s.color} soft={s.soft}>{status}</Badge>;
+  return <Badge color={s.color} soft={s.soft}>{statusLabel(status, type)}</Badge>;
 }
 
 function IconCircle({ icon: Icon, color, soft, size = 40 }) {
@@ -874,11 +922,14 @@ function Card({ children, className = '', padding = 'p-6' }) {
   );
 }
 
-function SectionTitle({ children, action }) {
+function SectionTitle({ children, subtitle, action }) {
   return (
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="font-display text-lg font-semibold" style={{ color: 'var(--text)' }}>{children}</h2>
-      {action}
+    <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+      <div className="min-w-0">
+        <h2 className="font-display text-lg font-semibold" style={{ color: 'var(--text)' }}>{children}</h2>
+        {subtitle && <p className="text-xs font-normal mt-0.5" style={{ color: 'var(--text-soft)' }}>{subtitle}</p>}
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -940,13 +991,13 @@ function Modal({ title, onClose, children, wide }) {
   );
 }
 
-function ConfirmModal({ title, description, onConfirm, onClose }) {
+function ConfirmModal({ title, description, onConfirm, onClose, variant = 'danger', confirmLabel = 'Confirmar' }) {
   return (
     <Modal title={title} onClose={onClose}>
       <p className="text-sm mb-6" style={{ color: 'var(--text-soft)' }}>{description}</p>
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-        <Button variant="danger" onClick={() => { onConfirm(); onClose(); }}>Confirmar</Button>
+        <Button variant={variant} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
       </div>
     </Modal>
   );
@@ -1002,7 +1053,7 @@ function CurrencyInput({ value, onChange, placeholder = '0,00' }) {
       <input
         value={display} onChange={handleChange} placeholder={placeholder} inputMode="numeric"
         className="w-full pl-9 pr-3.5 py-2.5 rounded-xl text-sm focus-ring tabular-nums"
-        style={{ border: '1px solid var(--border)', color: 'var(--text)' }}
+        style={{ border: '1px solid var(--border)', color: 'var(--text)', backgroundColor: 'var(--card)' }}
       />
     </div>
   );
@@ -1258,28 +1309,24 @@ function thisMonthSaved(mh) {
   return m.receitas - m.despesas;
 }
 
-function StatCard({ title, value, description, icon: Icon, color, soft, growth, isRing, ringPercent }) {
+function StatCard({ title, value, description, icon: Icon, color, soft, growth, progressPercent }) {
   return (
     <Card padding="p-5" className="animate-fade-up">
-      <div className="flex items-start justify-between mb-3">
-        <IconCircle icon={Icon} color={color} soft={soft} />
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <IconCircle icon={Icon} color={color} soft={soft} />
+          <p className="text-xs font-medium truncate" style={{ color: 'var(--text-soft)' }}>{title}</p>
+        </div>
         {growth != null && (
-          <span className="flex items-center gap-0.5 text-xs font-semibold" style={{ color: growth >= 0 ? 'var(--income)' : 'var(--expense)' }}>
+          <span className="flex items-center gap-0.5 text-xs font-semibold shrink-0" style={{ color: growth >= 0 ? 'var(--income)' : 'var(--expense)' }}>
             {growth >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
             {Math.abs(growth).toFixed(0)}%
           </span>
         )}
       </div>
-      <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-soft)' }}>{title}</p>
-      {isRing ? (
-        <div className="flex items-center gap-3">
-          <RingProgress percent={ringPercent} size={44} strokeWidth={5} color={color}>
-            <span className="font-display text-xs font-bold" style={{ color }}>{ringPercent.toFixed(0)}%</span>
-          </RingProgress>
-          <p className="font-display text-lg font-bold tabular-nums" style={{ color: 'var(--text)' }}>{value}</p>
-        </div>
-      ) : (
-        <p className="font-display text-2xl font-bold tabular-nums mb-1" style={{ color: 'var(--text)' }}>{value}</p>
+      <p className="font-display text-2xl font-bold tabular-nums mb-1" style={{ color: 'var(--text)' }}>{value}</p>
+      {progressPercent != null && (
+        <div className="my-2"><ProgressBar percent={progressPercent} color={color} /></div>
       )}
       {description && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>{description}</p>}
     </Card>
@@ -1293,7 +1340,7 @@ function KPIRow({ kpis }) {
     { title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
     { title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
     { title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
-    { title: 'Meta mensal', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', isRing: true, ringPercent: metaPercent },
+    { title: 'Meta mensal', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
     { title: 'Patrimônio total', value: formatBRL(kpis.patrimonio), description: 'Contas + investimentos', icon: Landmark, color: 'var(--invest)', soft: 'var(--invest-soft)', growth: kpis.growth.patrimonio },
   ];
   return (
@@ -1334,11 +1381,11 @@ function EvolutionChart({ data }) {
         <ResponsiveContainer>
           <LineChart data={chartData} margin={{ left: -18, right: 8, top: 6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={{ stroke: '#E7E4DE' }} tickLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+            <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
             <Tooltip
               formatter={(value, name) => [formatBRL(value), name]}
-              contentStyle={{ borderRadius: 12, border: '1px solid #E7E4DE', fontSize: 12, fontFamily: 'Plus Jakarta Sans' }}
+              contentStyle={{ borderRadius: 12, border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)', fontSize: 12, fontFamily: 'Plus Jakarta Sans' }}
             />
             {series.map((s) => visible[s.key] && (
               <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} animationDuration={800} />
@@ -1354,31 +1401,52 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
   const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
   const total = entries.reduce((s, [, v]) => s + v, 0);
   const chartData = entries.map(([name, value]) => ({ name, value, color: (CATEGORIES[name] || CATEGORIES['Outros']).color }));
+  const [activeIndex, setActiveIndex] = useState(null);
   if (entries.length === 0) {
     return (
       <Card className="animate-fade-up">
-        <SectionTitle>{title} <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>{subtitle}</span></SectionTitle>
+        <SectionTitle subtitle={subtitle}>{title}</SectionTitle>
         <EmptyState icon={PieChartIcon} title="Nenhum gasto registrado" description="Assim que você lançar despesas pagas neste período, elas aparecem aqui." />
       </Card>
     );
   }
+  const active = activeIndex != null ? chartData[activeIndex] : null;
   return (
     <Card className="animate-fade-up">
-      <SectionTitle>{title} <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>{subtitle}</span></SectionTitle>
+      <SectionTitle subtitle={subtitle}>{title}</SectionTitle>
       <div className="flex flex-col sm:flex-row items-center gap-4">
-        <div style={{ width: 170, height: 170 }} className="shrink-0">
+        {/* Sem Tooltip flutuante de propósito — ela cobria o gráfico. O destaque aparece no
+            centro do donut (que já é um espaço vazio) e na linha da legenda correspondente. */}
+        <div style={{ width: 170, height: 170 }} className="shrink-0 relative">
           <ResponsiveContainer>
             <PieChart>
-              <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2} animationDuration={700}>
-                {chartData.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
+              <Pie
+                data={chartData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2} animationDuration={700}
+                onMouseEnter={(_, i) => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
+                onClick={(_, i) => setActiveIndex((cur) => (cur === i ? null : i))}
+              >
+                {chartData.map((entry, i) => (
+                  <Cell key={i} fill={entry.color} stroke="none" opacity={activeIndex == null || activeIndex === i ? 1 : 0.35} style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }} />
+                ))}
               </Pie>
-              <Tooltip formatter={(value) => formatBRL(value)} contentStyle={{ borderRadius: 12, border: '1px solid #E7E4DE', fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2 text-center">
+            <span className="text-[10px] leading-tight truncate max-w-[90px]" style={{ color: 'var(--text-soft)' }}>{active ? active.name : 'Total'}</span>
+            <span className="font-display text-sm font-bold tabular-nums leading-tight" style={{ color: active ? active.color : 'var(--text)' }}>
+              {formatBRL(active ? active.value : total)}
+            </span>
+          </div>
         </div>
-        <div className="w-full space-y-2">
+        <div className="w-full space-y-1">
           {chartData.map((entry, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
+            <div
+              key={i}
+              onMouseEnter={() => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
+              onClick={() => setActiveIndex((cur) => (cur === i ? null : i))}
+              className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer transition-colors"
+              style={{ backgroundColor: activeIndex === i ? entry.color + '26' : 'transparent' }}
+            >
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
               <span className="flex-1 truncate" style={{ color: 'var(--text)' }}>{entry.name}</span>
               <span className="tabular-nums font-medium" style={{ color: 'var(--text-soft)' }}>{((entry.value / total) * 100).toFixed(0)}%</span>
@@ -1410,7 +1478,14 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
               <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
                 <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate" style={{ color: 'var(--text)' }}>{tx.description}</p>
+                  <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
+                    {tx.description}
+                    {tx.installmentGroupId && (
+                      <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                        {tx.installmentIndex}/{tx.installmentCount}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
                 </div>
                 <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
@@ -1696,13 +1771,48 @@ function FinancialCalendar({ cards, transactions }) {
 
 /* ---------- Cartões (preview) ---------- */
 
-function CreditCardVisual({ card, transactions, gradient, onPayInvoice }) {
+function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
+  const [accountId, setAccountId] = useState(card.accountId || '');
+  return (
+    <Modal title={`Pagar fatura — ${card.bank}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-xl p-4 text-center" style={{ backgroundColor: 'var(--bg)' }}>
+          <p className="text-xs mb-1" style={{ color: 'var(--text-soft)' }}>Valor da fatura</p>
+          <p className="font-display text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(amount)}</p>
+        </div>
+        <div>
+          <FieldLabel>Debitar de qual conta?</FieldLabel>
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-sm focus-ring" style={inputStyle}>
+            <option value="">Nenhuma (só marcar como paga)</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
+            {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
+          </p>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={() => { onConfirm(accountId || null); onClose(); }}>Confirmar pagamento</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments }) {
   const invoice = useMemo(() => computeCardInvoice(card, transactions), [card, transactions]);
   const percentUsed = card.limit > 0 ? (invoice / card.limit) * 100 : 0;
   const barColor = percentUsed > 85 ? 'var(--expense)' : percentUsed > 65 ? 'var(--alert)' : 'var(--income)';
   const nextDue = useMemo(() => getNextCardDueDate(card), [card.dueDay]);
   const dueWasAdjusted = nextDue.getDate() !== card.dueDay;
   const nextDueLabel = nextDue.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [confirmAdvance, setConfirmAdvance] = useState(false);
+  const futureInstallments = useMemo(() => {
+    const cutoff = ymd(nextDue);
+    return transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.status === 'Pago' && t.date > cutoff);
+  }, [card.id, transactions, nextDue]);
+  const futureTotal = futureInstallments.reduce((s, t) => s + t.amount, 0);
   return (
     <div className="rounded-2xl p-5 text-white shadow-soft-lg" style={{ background: gradient }}>
       <div className="flex items-start justify-between mb-6">
@@ -1718,7 +1828,7 @@ function CreditCardVisual({ card, transactions, gradient, onPayInvoice }) {
           <p className="font-display text-2xl font-bold tabular-nums">{formatBRL(invoice)}</p>
         </div>
         {invoice > 0 ? (
-          <button onClick={() => onPayInvoice(card, invoice)} className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors shrink-0">
+          <button onClick={() => setShowPayModal(true)} className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors shrink-0">
             Pagar fatura
           </button>
         ) : (
@@ -1744,6 +1854,24 @@ function CreditCardVisual({ card, transactions, gradient, onPayInvoice }) {
       {card.paidThroughDate && (
         <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
       )}
+      {futureInstallments.length > 0 && onAdvanceInstallments && (
+        <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+          <span className="opacity-80">{futureInstallments.length} parcela(s) futura(s) — {formatBRL(futureTotal)}</span>
+          <span className="font-medium underline shrink-0">Antecipar</span>
+        </button>
+      )}
+      {showPayModal && (
+        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId) => onPayInvoice(card, invoice, accountId)} onClose={() => setShowPayModal(false)} />
+      )}
+      {confirmAdvance && (
+        <ConfirmModal
+          title="Antecipar parcelas futuras"
+          description={`Isso traz ${futureInstallments.length} parcela(s) que ainda não venceram (totalizando ${formatBRL(futureTotal)}) para a fatura atual, quitando o restante da compra de uma vez.`}
+          variant="primary" confirmLabel="Antecipar"
+          onConfirm={() => onAdvanceInstallments(card)}
+          onClose={() => setConfirmAdvance(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1754,14 +1882,14 @@ const CARD_GRADIENTS = [
   'linear-gradient(135deg, #6D6558 0%, #3A362E 100%)',
 ];
 
-function CardsPreview({ cards, transactions, onPayInvoice, onSeeAll }) {
+function CardsPreview({ cards, transactions, accounts, onPayInvoice, onAdvanceInstallments, onSeeAll }) {
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todos <ArrowRight size={12} /></button>}>
         Cartões de crédito
       </SectionTitle>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} transactions={transactions} onPayInvoice={onPayInvoice} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />)}
+        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />)}
       </div>
     </Card>
   );
@@ -1773,8 +1901,8 @@ function RecurringPreview({ recurring, onSeeAll }) {
   const total = recurring.reduce((s, r) => s + r.value, 0);
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
-      <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
-        Despesas recorrentes <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>{formatBRL(total)}/mês</span>
+      <SectionTitle subtitle={`${formatBRL(total)}/mês`} action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
+        Despesas recorrentes
       </SectionTitle>
       <div className="space-y-3">
         {recurring.slice(0, 5).map((r) => {
@@ -1890,7 +2018,7 @@ function DashboardPage({ data, actions }) {
       <GoalsSection goals={data.goals} onAddFunds={actions.addGoalFunds} onDelete={actions.deleteGoal} onSeeAll={() => actions.goTo('metas')} compact />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <FinancialCalendar cards={data.cards} transactions={data.transactions} />
-        <CardsPreview cards={data.cards} transactions={data.transactions} onPayInvoice={actions.payCardInvoice} onSeeAll={() => actions.goTo('cartoes')} />
+        <CardsPreview cards={data.cards} transactions={data.transactions} accounts={data.accounts} onPayInvoice={actions.payCardInvoice} onAdvanceInstallments={actions.advanceAllFutureInstallments} onSeeAll={() => actions.goTo('cartoes')} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RecurringPreview recurring={data.recurring} onSeeAll={() => actions.goTo('recorrentes')} />
@@ -1905,13 +2033,18 @@ function DashboardPage({ data, actions }) {
    FORMULÁRIO DE TRANSAÇÃO
    ============================================================ */
 
-function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
+function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onClose }) {
   const [form, setForm] = useState(initial || {
     type: 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
     paymentMethod: 'Pix', date: new Date().toISOString().slice(0, 10), status: 'Pago',
-    isSalary: false, grossSalary: 0, dependents: 0, cardId: null,
+    isSalary: false, grossSalary: 0, dependents: 0, cardId: null, benefitId: null, benefitType: null,
   });
   const [errors, setErrors] = useState({});
+  // Parcelamento só é oferecido ao criar um lançamento novo (editar uma parcela já existente
+  // edita só aquela ocorrência — não faz sentido reabrir o plano inteiro).
+  const [installmentEnabled, setInstallmentEnabled] = useState(false);
+  const [installmentCount, setInstallmentCount] = useState(2);
+  const [installmentTotal, setInstallmentTotal] = useState(0);
 
   const cltBreakdown = useMemo(
     () => (form.isSalary ? calcCLTNetSalary(form.grossSalary, form.dependents) : null),
@@ -1925,15 +2058,47 @@ function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.isSalary, cltBreakdown?.net]);
 
+  const selectedCard = cards.find((c) => c.id === form.cardId);
+  const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
+  const perInstallment = installmentCount > 0 ? installmentTotal / installmentCount : 0;
+  const isEditingInstallment = !!initial?.installmentGroupId;
+
   function validate() {
     const e = {};
     if (!form.description.trim()) e.description = 'Informe uma descrição';
-    if (!form.amount || form.amount <= 0) e.amount = 'Informe um valor maior que zero';
+    if (installmentEnabled) {
+      if (!installmentTotal || installmentTotal <= 0) e.amount = 'Informe o valor total da compra';
+    } else if (!form.amount || form.amount <= 0) e.amount = 'Informe um valor maior que zero';
     if (!form.date) e.date = 'Informe uma data';
     if (!form.account) e.account = 'Selecione uma conta';
     if (form.isSalary && (!form.grossSalary || form.grossSalary <= 0)) e.grossSalary = 'Informe o salário bruto';
     setErrors(e);
     return Object.keys(e).length === 0;
+  }
+
+  function handleSubmit() {
+    if (!validate()) return;
+    if (installmentEnabled && !initial) {
+      onSave({ ...form, amount: perInstallment, installmentPlan: { count: installmentCount, totalAmount: installmentTotal } });
+    } else {
+      onSave(form);
+    }
+  }
+
+  function selectPaymentSource(v) {
+    if (!v) {
+      setForm({ ...form, cardId: null, benefitId: null, benefitType: null });
+      setInstallmentEnabled(false);
+    } else if (v.startsWith('card:')) {
+      const cardId = v.slice(5);
+      const card = cards.find((c) => c.id === cardId);
+      setForm({ ...form, cardId, benefitId: null, benefitType: null, account: card ? card.accountId : form.account, paymentMethod: 'Cartão de crédito' });
+    } else {
+      const [, benefitId, benefitType] = v.split(':');
+      const benefit = benefits.find((b) => b.id === benefitId);
+      setForm({ ...form, cardId: null, benefitId, benefitType, account: benefit ? form.account : form.account, paymentMethod: 'Vale-benefícios' });
+      setInstallmentEnabled(false);
+    }
   }
 
   return (
@@ -1942,7 +2107,7 @@ function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
         <div className="flex gap-2">
           {['despesa', 'receita'].map((t) => (
             <button
-              key={t} onClick={() => setForm({ ...form, type: t, isSalary: t === 'receita' ? form.isSalary : false, cardId: t === 'receita' ? null : form.cardId })}
+              key={t} onClick={() => setForm({ ...form, type: t, isSalary: t === 'receita' ? form.isSalary : false, cardId: t === 'receita' ? null : form.cardId, benefitId: t === 'receita' ? null : form.benefitId, benefitType: t === 'receita' ? null : form.benefitType })}
               className="flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors"
               style={{
                 borderColor: form.type === t ? (t === 'receita' ? 'var(--income)' : 'var(--expense)') : 'var(--border)',
@@ -1989,22 +2154,44 @@ function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <FieldLabel error={errors.amount}>Valor</FieldLabel>
-            {form.isSalary ? (
-              <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(form.amount)} <span className="ml-1 text-xs">(líquido calculado)</span></div>
-            ) : (
-              <CurrencyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
-            )}
-            {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
+        {isEditingInstallment && (
+          <div className="rounded-xl p-3 text-xs flex items-center gap-2" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+            <CreditCard size={14} className="shrink-0" />
+            Parcela {initial.installmentIndex} de {initial.installmentCount} desta compra parcelada. Editar aqui altera só esta parcela — pra antecipar as parcelas restantes, use o cartão em Cartões.
           </div>
-          <div>
-            <FieldLabel error={errors.date}>Data</FieldLabel>
-            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputClass} style={inputStyle} />
-            {errors.date && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.date}</p>}
+        )}
+
+        {installmentEnabled && !initial ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
+              <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
+              {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
+            </div>
+            <div>
+              <FieldLabel error={errors.date}>Data da compra</FieldLabel>
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputClass} style={inputStyle} />
+              {errors.date && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.date}</p>}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <FieldLabel error={errors.amount}>Valor</FieldLabel>
+              {form.isSalary ? (
+                <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(form.amount)} <span className="ml-1 text-xs">(líquido calculado)</span></div>
+              ) : (
+                <CurrencyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
+              )}
+              {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
+            </div>
+            <div>
+              <FieldLabel error={errors.date}>Data</FieldLabel>
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputClass} style={inputStyle} />
+              {errors.date && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.date}</p>}
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
@@ -2017,24 +2204,56 @@ function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
             <select value={form.account} disabled={!!form.cardId} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: form.cardId ? 0.6 : 1 }}>
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
             </select>
+            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Definida automaticamente pela conta vinculada ao cartão escolhido — é de propósito, não um bug.</p>}
           </div>
         </div>
-        {form.type === 'despesa' && cards.length > 0 && (
+        {form.type === 'despesa' && (cards.length > 0 || benefits.length > 0) && (
           <div>
-            <FieldLabel>Cartão (opcional)</FieldLabel>
+            <FieldLabel>Cartão ou vale-benefícios (opcional)</FieldLabel>
             <select
-              value={form.cardId || ''}
-              onChange={(e) => {
-                const cardId = e.target.value || null;
-                const card = cards.find((c) => c.id === cardId);
-                setForm({ ...form, cardId, account: card ? card.accountId : form.account, paymentMethod: card ? 'Cartão de crédito' : form.paymentMethod });
-              }}
+              value={form.cardId ? `card:${form.cardId}` : form.benefitId ? `benefit:${form.benefitId}:${form.benefitType}` : ''}
+              onChange={(e) => selectPaymentSource(e.target.value)}
               className={inputClass} style={inputStyle}
             >
               <option value="">Nenhum (débito direto da conta)</option>
-              {cards.map((c) => <option key={c.id} value={c.id}>{c.bank} — {c.brand}</option>)}
+              {cards.length > 0 && (
+                <optgroup label="Cartões de crédito">
+                  {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.bank} — {c.brand}</option>)}
+                </optgroup>
+              )}
+              {benefits.length > 0 && (
+                <optgroup label="Vale-benefícios">
+                  {benefits.map((b) => [
+                    <option key={`${b.id}-food`} value={`benefit:${b.id}:foodBalance`}>{b.provider} — Alimentação (saldo {formatBRL(b.foodBalance)})</option>,
+                    <option key={`${b.id}-mob`} value={`benefit:${b.id}:mobilityBalance`}>{b.provider} — Transporte (saldo {formatBRL(b.mobilityBalance)})</option>,
+                  ])}
+                </optgroup>
+              )}
             </select>
-            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
+            {selectedCard && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
+            {selectedBenefit && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>O valor é descontado automaticamente do saldo desse vale-benefícios ao salvar — sem precisar atualizar na mão.</p>}
+          </div>
+        )}
+        {form.type === 'despesa' && selectedCard && !initial && (
+          <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: 'var(--text)' }}>
+              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) setInstallmentTotal(form.amount || 0); }} className="focus-ring" />
+              Compra parcelada
+            </label>
+            {installmentEnabled && (
+              <>
+                <div>
+                  <FieldLabel>Número de parcelas</FieldLabel>
+                  <input type="number" min={2} max={48} value={installmentCount} onChange={(e) => setInstallmentCount(Math.max(2, Math.min(48, Number(e.target.value) || 2)))} className={inputClass} style={inputStyle} />
+                </div>
+                <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                  {installmentCount}x de {formatBRL(perInstallment)}
+                </div>
+                <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                  Cada parcela vira um lançamento no mês certo, respeitando o fechamento do cartão (dia {selectedCard.closingDay}) — não conta como despesa recorrente. Dá pra antecipar as parcelas que faltam a qualquer momento na página do cartão.
+                </p>
+              </>
+            )}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
@@ -2046,14 +2265,14 @@ function TransactionForm({ initial, accounts, cards, onSave, onClose }) {
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={inputStyle}>
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            <select value={form.status} disabled={installmentEnabled && !initial} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: installmentEnabled && !initial ? 0.6 : 1 }}>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
             </select>
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (validate()) onSave(form); }}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
+          <Button onClick={handleSubmit}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
         </div>
       </div>
     </Modal>
@@ -2112,7 +2331,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
             <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Total selecionado</p>
             <p className="font-display text-lg font-semibold" style={{ color: 'var(--expense)' }}>{formatBRL(selectedTotal)}</p>
           </div>
-          <div className="rounded-xl p-3" style={{ backgroundColor: '#EEEDE8' }}>
+          <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--bg)' }}>
             <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Duplicadas ignoradas</p>
             <p className="font-display text-lg font-semibold" style={{ color: 'var(--text)' }}>{duplicateCount}</p>
           </div>
@@ -2200,7 +2419,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ filterType, title, transactions, accounts, cards, onAdd, onEdit, onDelete, onImport }) {
+function TransactionsPage({ filterType, title, transactions, accounts, cards, benefits = [], onAdd, onEdit, onDelete, onImport }) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
@@ -2349,10 +2568,17 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, on
                 {pageData.map((tx) => (
                   <tr key={tx.id} className="text-sm hover:bg-black/[0.02]">
                     <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
-                    <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>{tx.description}</td>
+                    <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
+                      {tx.description}
+                      {tx.installmentGroupId && (
+                        <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                          {tx.installmentIndex}/{tx.installmentCount}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-3 pr-3"><CategoryBadge category={tx.category} /></td>
                     <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</td>
-                    <td className="py-3 pr-3"><StatusBadge status={tx.status} /></td>
+                    <td className="py-3 pr-3"><StatusBadge status={tx.status} type={tx.type} /></td>
                     <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida'}</td>
                     <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
                     <td className="py-3 pr-1 no-print">
@@ -2379,8 +2605,8 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, on
         )}
       </Card>
 
-      {showForm && <TransactionForm accounts={accounts} cards={cards} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
-      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} />}
+      {showForm && <TransactionForm accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
+      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} />}
       {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} cards={cards} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
     </div>
   );
@@ -2778,7 +3004,7 @@ function BenefitCard({ benefit, onUpdate, onDelete }) {
         </div>
         <button onClick={() => onDelete(benefit)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--text-soft)" /></button>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3">
         <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} history={benefit.foodHistory} onUpdate={(value, note) => onUpdate(benefit, 'foodBalance', value, note)} />
         <BenefitBalance label="Transporte" icon={Car} value={benefit.mobilityBalance} history={benefit.mobilityHistory} onUpdate={(value, note) => onUpdate(benefit, 'mobilityBalance', value, note)} />
       </div>
@@ -2786,7 +3012,7 @@ function BenefitCard({ benefit, onUpdate, onDelete }) {
   );
 }
 
-function CardsPage({ cards, transactions, accounts, onAdd, onDelete, onPayInvoice, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit }) {
+function CardsPage({ cards, transactions, accounts, onAdd, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteCard, setConfirmDeleteCard] = useState(null);
@@ -2797,7 +3023,7 @@ function CardsPage({ cards, transactions, accounts, onAdd, onDelete, onPayInvoic
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {cards.map((c, i) => (
           <div key={c.id} className="relative group">
-            <CreditCardVisual card={c} transactions={transactions} onPayInvoice={onPayInvoice} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
+            <CreditCardVisual card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
             <button onClick={() => setConfirmDeleteCard(c)} className="absolute top-4 right-4 p-1.5 rounded-lg bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
               <Trash2 size={14} color="#fff" />
             </button>
@@ -2805,8 +3031,8 @@ function CardsPage({ cards, transactions, accounts, onAdd, onDelete, onPayInvoic
         ))}
       </div>
 
-      <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowBenefitForm(true)}>Novo vale-benefícios</Button>}>
-        Vale-benefícios <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>alimentação e transporte no mesmo cartão</span>
+      <SectionTitle subtitle="Alimentação e transporte" action={<Button size="sm" icon={Plus} onClick={() => setShowBenefitForm(true)}>Novo vale-benefícios</Button>}>
+        Vale-benefícios
       </SectionTitle>
       {benefits.length === 0 ? (
         <Card><EmptyState icon={Utensils} title="Nenhum vale-benefícios cadastrado" description="Adicione seu cartão Flash (ou similar) para acompanhar alimentação e transporte separadamente." /></Card>
@@ -2887,6 +3113,7 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [activeAllocation, setActiveAllocation] = useState(null);
 
   const totalInvested = investments.reduce((s, i) => s + i.invested, 0);
   const totalCurrent = investments.reduce((s, i) => s + i.currentValue, 0);
@@ -2911,19 +3138,29 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
           <div style={{ width: '100%', height: 180 }}>
             <ResponsiveContainer>
               <PieChart>
-                <Pie data={allocation} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
-                  {allocation.map((a, i) => <Cell key={i} fill={a.color} />)}
+                <Pie
+                  data={allocation} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}
+                  onMouseEnter={(_, i) => setActiveAllocation(i)} onMouseLeave={() => setActiveAllocation(null)}
+                >
+                  {allocation.map((a, i) => (
+                    <Cell key={i} fill={a.color} stroke="none" opacity={activeAllocation == null || activeAllocation === i ? 1 : 0.35} style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }} />
+                  ))}
                 </Pie>
-                <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid #E7E4DE', fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="space-y-2 mt-2">
+          <div className="space-y-1 mt-2">
             {allocation.map((a, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm">
+              <div
+                key={i}
+                onMouseEnter={() => setActiveAllocation(i)} onMouseLeave={() => setActiveAllocation(null)}
+                className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 transition-colors"
+                style={{ backgroundColor: activeAllocation === i ? a.color + '26' : 'transparent' }}
+              >
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
                 <span className="flex-1 truncate" style={{ color: 'var(--text)' }}>{a.name}</span>
                 <span className="tabular-nums" style={{ color: 'var(--text-soft)' }}>{totalCurrent > 0 ? ((a.value / totalCurrent) * 100).toFixed(0) : 0}%</span>
+                <span className="tabular-nums w-20 text-right shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(a.value)}</span>
               </div>
             ))}
           </div>
@@ -3048,6 +3285,7 @@ function RecurringForm({ onSave, onClose }) {
 function RecurringExpensesPage({ recurring, accounts, onAdd, onDelete, onLaunchNow }) {
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [activeBarIndex, setActiveBarIndex] = useState(null);
   const total = recurring.reduce((s, r) => s + r.value, 0);
   const byCategory = {};
   recurring.forEach((r) => { byCategory[r.category] = (byCategory[r.category] || 0) + r.value; });
@@ -3065,15 +3303,23 @@ function RecurringExpensesPage({ recurring, accounts, onAdd, onDelete, onLaunchN
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <Card className="lg:col-span-2">
-          <SectionTitle>Por categoria <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>onde você mais gasta de forma fixa</span></SectionTitle>
+          <SectionTitle subtitle="onde você mais gasta de forma fixa">Por categoria</SectionTitle>
+          {/* Tooltip removido de propósito (cobria as barras num gráfico já pequeno) — passar o
+              mouse ou tocar numa barra só destaca ela e esmaece as outras. */}
           <div style={{ width: '100%', height: 200 }}>
             <ResponsiveContainer>
-              <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 16 }}>
-                <XAxis type="number" tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${v}`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={false} tickLine={false} width={110} />
-                <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid #E7E4DE', fontSize: 12 }} />
-                <Bar dataKey="value" radius={[0, 6, 6, 0]}>
-                  {chartData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 16 }} onMouseLeave={() => setActiveBarIndex(null)}>
+                <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${v}`} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} width={110} />
+                <Bar dataKey="value" radius={[0, 6, 6, 0]} label={{ position: 'right', fontSize: 11, fill: 'var(--text-soft)', formatter: (v) => formatBRL(v) }}>
+                  {chartData.map((entry, i) => (
+                    <Cell
+                      key={i} fill={entry.color}
+                      opacity={activeBarIndex == null || activeBarIndex === i ? 1 : 0.35}
+                      onMouseEnter={() => setActiveBarIndex(i)}
+                      style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }}
+                    />
+                  ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -3081,24 +3327,25 @@ function RecurringExpensesPage({ recurring, accounts, onAdd, onDelete, onLaunchN
         </Card>
         <Card className="lg:col-span-3">
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Nova despesa</Button>}>Assinaturas e despesas fixas</SectionTitle>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recurring.map((r) => {
               const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
               return (
-                <div key={r.id} className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 p-3 rounded-xl hover:bg-black/[0.02]">
-                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
-                  <div className="flex-1 min-w-[140px]">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
-                      <span className="sm:hidden text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <CategoryBadge category={r.category} />
-                      <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                <div key={r.id} className="p-3 rounded-xl hover:bg-black/[0.02]">
+                  <div className="flex items-center gap-3">
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
+                        <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <CategoryBadge category={r.category} />
+                        <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                      </div>
                     </div>
                   </div>
-                  <span className="hidden sm:inline text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
-                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <div className="flex items-center gap-2 justify-end mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
                     <button
                       onClick={() => onLaunchNow(r, accounts[0]?.id)}
                       disabled={!accounts[0]}
@@ -3153,9 +3400,9 @@ function ReportsPage({ monthlyHistory, categoryComparison }) {
           <ResponsiveContainer>
             <BarChart data={barData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={{ stroke: '#E7E4DE' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#6D6D6D' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid #E7E4DE', fontSize: 12 }} />
+              <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)', fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="Receitas" fill="#5A8F5A" radius={[6, 6, 0, 0]} />
               <Bar dataKey="Despesas" fill="#B66B6B" radius={[6, 6, 0, 0]} />
@@ -3573,24 +3820,60 @@ export default function App() {
   function goTo(page) { setActivePage(page); window.scrollTo({ top: 0 }); }
 
   /* ---- transações ---- */
+  // Uma compra parcelada vira N lançamentos de uma vez (um por parcela), cada um datado pra
+  // cair na fatura certa (respeitando o fechamento do cartão) — assim o histórico de gastos
+  // por mês fica correto sem precisar de nenhuma lógica especial nos relatórios.
   function addTransaction(form) {
+    if (form.installmentPlan) {
+      const { count, totalAmount } = form.installmentPlan;
+      const card = cards.find((c) => c.id === form.cardId);
+      const groupId = uid();
+      const perBase = Math.round((totalAmount / count) * 100) / 100;
+      const lastAmount = Math.round((totalAmount - perBase * (count - 1)) * 100) / 100;
+      const [py, pm, pd] = form.date.split('-').map(Number);
+      const purchaseDate = new Date(py, pm - 1, pd);
+      const rest = { ...form };
+      delete rest.installmentPlan;
+      const newTxs = [];
+      for (let i = 0; i < count; i++) {
+        const amount = i === count - 1 ? lastAmount : perBase;
+        const dueDate = card ? getInstallmentDueDate(card, purchaseDate, i) : new Date(py, pm - 1 + i, pd);
+        newTxs.push({
+          ...rest, id: uid(), amount, date: ymd(dueDate), status: 'Pago',
+          installmentGroupId: groupId, installmentIndex: i + 1, installmentCount: count,
+        });
+      }
+      const updated = [...newTxs, ...transactions];
+      let updatedAccounts = accounts;
+      newTxs.forEach((t) => { updatedAccounts = reapplyAccountEffect(updatedAccounts, null, t); });
+      setTransactions(updated); setAccounts(updatedAccounts);
+      persist({ transactions: updated, accounts: updatedAccounts });
+      addToast(`Compra parcelada em ${count}x de ${formatBRL(perBase)} lançada.`);
+      return;
+    }
     const newTx = { ...form, id: uid() };
     const updated = [newTx, ...transactions];
     const updatedAccounts = reapplyAccountEffect(accounts, null, newTx);
-    setTransactions(updated); setAccounts(updatedAccounts); persist({ transactions: updated, accounts: updatedAccounts });
+    const updatedBenefits = reapplyBenefitEffect(benefits, null, newTx);
+    setTransactions(updated); setAccounts(updatedAccounts); setBenefits(updatedBenefits);
+    persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
     addToast('Lançamento adicionado com sucesso.');
   }
   function editTransaction(form) {
     const oldTx = transactions.find((t) => t.id === form.id);
     const updated = transactions.map((t) => (t.id === form.id ? form : t));
     const updatedAccounts = reapplyAccountEffect(accounts, oldTx, form);
-    setTransactions(updated); setAccounts(updatedAccounts); persist({ transactions: updated, accounts: updatedAccounts });
+    const updatedBenefits = reapplyBenefitEffect(benefits, oldTx, form);
+    setTransactions(updated); setAccounts(updatedAccounts); setBenefits(updatedBenefits);
+    persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
     addToast('Lançamento atualizado.');
   }
   function deleteTransaction(tx) {
     const updated = transactions.filter((t) => t.id !== tx.id);
     const updatedAccounts = reapplyAccountEffect(accounts, tx, null);
-    setTransactions(updated); setAccounts(updatedAccounts); persist({ transactions: updated, accounts: updatedAccounts });
+    const updatedBenefits = reapplyBenefitEffect(benefits, tx, null);
+    setTransactions(updated); setAccounts(updatedAccounts); setBenefits(updatedBenefits);
+    persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
     addToast('Lançamento removido.');
   }
   function importTransactions(rows, meta = {}) {
@@ -3671,22 +3954,49 @@ export default function App() {
     setCards(updated); persist({ cards: updated });
     addToast('Cartão removido.');
   }
-  // Pagar a fatura é um lançamento de verdade (despesa na conta vinculada) — é isso que faz o
-  // saldo da conta cair e "zera" a fatura calculada do cartão a partir de hoje.
-  // Atualiza transações + contas + cartões juntos, numa única persistência (evita persistir um
-  // "transactions" desatualizado por causa da closure, se isso fosse composto com addTransaction).
-  function payCardInvoice(card, amount) {
+  // Pagar a fatura é um lançamento de verdade (despesa na conta escolhida) — é isso que faz o
+  // saldo da conta cair e "zera" a fatura calculada do cartão a partir de hoje. Se o usuário
+  // escolher "nenhuma conta", o pagamento só marca a fatura como quitada, sem mexer em saldo
+  // (útil pra quem paga por fora do que é acompanhado no dashboard).
+  function payCardInvoice(card, amount, accountId) {
     const today = new Date().toISOString().slice(0, 10);
     const newTx = {
       id: uid(), description: `Fatura ${card.bank}`, amount, category: 'Outros', type: 'despesa',
-      account: card.accountId, paymentMethod: 'Transferência', date: today, status: 'Pago',
+      account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
     };
-    const updatedTransactions = [newTx, ...transactions];
-    const updatedAccounts = reapplyAccountEffect(accounts, null, newTx);
     const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: today } : c));
-    setTransactions(updatedTransactions); setAccounts(updatedAccounts); setCards(updatedCards);
-    persist({ transactions: updatedTransactions, accounts: updatedAccounts, cards: updatedCards });
+    setCards(updatedCards);
+    if (accountId) {
+      const updatedTransactions = [newTx, ...transactions];
+      const updatedAccounts = reapplyAccountEffect(accounts, null, newTx);
+      setTransactions(updatedTransactions); setAccounts(updatedAccounts);
+      persist({ transactions: updatedTransactions, accounts: updatedAccounts, cards: updatedCards });
+    } else {
+      persist({ cards: updatedCards });
+    }
     addToast(`Fatura do ${card.bank} paga (${formatBRL(amount)}).`);
+  }
+  // Traz TODAS as parcelas futuras (ainda não vencidas) de um cartão pra fatura atual, somadas
+  // numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o que
+  // falta de uma vez, em vez de esperar os próximos meses.
+  function advanceAllFutureInstallments(card) {
+    const cutoff = ymd(getNextCardDueDate(card));
+    const future = transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.status === 'Pago' && t.date > cutoff);
+    if (future.length === 0) return;
+    const groups = {};
+    future.forEach((t) => { (groups[t.installmentGroupId] = groups[t.installmentGroupId] || []).push(t); });
+    const merged = Object.values(groups).map((group) => {
+      const total = group.reduce((s, t) => s + t.amount, 0);
+      const base = group[0];
+      const cleanDesc = base.description.replace(/\s*\(\d+\/\d+\)\s*$/, '');
+      return { ...base, id: uid(), amount: total, date: cutoff, description: `${cleanDesc} (parcelas antecipadas)`, installmentGroupId: null, installmentIndex: null, installmentCount: null };
+    });
+    const futureIds = new Set(future.map((t) => t.id));
+    const kept = transactions.filter((t) => !futureIds.has(t.id));
+    const updated = [...merged, ...kept];
+    setTransactions(updated); persist({ transactions: updated });
+    const total = future.reduce((s, t) => s + t.amount, 0);
+    addToast(`${future.length} parcela(s) futura(s) antecipada(s) para a fatura atual (${formatBRL(total)}).`);
   }
 
   /* ---- vale-benefícios ---- */
@@ -3824,7 +4134,7 @@ export default function App() {
   };
   const actions = {
     goTo, editTransaction, deleteTransaction, addGoalFunds, deleteGoal,
-    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction, payCardInvoice,
+    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction, payCardInvoice, advanceAllFutureInstallments,
   };
 
   if (isLoading) {
@@ -3868,11 +4178,11 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
-              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
-              {activePage === 'despesas' && <TransactionsPage filterType="despesa" title="Despesas" transactions={transactions} accounts={accounts} cards={cards} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
+              {activePage === 'despesas' && <TransactionsPage filterType="despesa" title="Despesas" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} onAdd={addCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} onAdd={addCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} onAdd={addRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
@@ -3891,7 +4201,7 @@ export default function App() {
       </div>
 
       {modal?.type === 'newTransaction' && (
-        <TransactionForm accounts={accounts} cards={cards} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+        <TransactionForm accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
       )}
       {syncConflict && (
         <SyncConflictModal date={syncConflict.date} onUseRemote={resolveSyncUseRemote} onKeepLocal={resolveSyncKeepLocal} />
