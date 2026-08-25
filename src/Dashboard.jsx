@@ -1253,7 +1253,7 @@ function SyncConflictModal({ date, onUseRemote, onKeepLocal }) {
 
 // Botão flutuante de novo lançamento — só faz sentido em telas onde a barra lateral não fica
 // sempre visível (abaixo do breakpoint lg, ela vira uma gaveta que precisa do menu hambúrguer
-// pra abrir). Fica próximo da base da tela.
+// pra abrir). Fica rente à base da tela, no mesmo nível da faixa dos toasts.
 // Enquanto o usuário rola a tela ele encolhe pela metade, e volta ao tamanho normal depois
 // de 0,75s sem nenhum scroll (ver handleContentScroll no App).
 function FAB({ onClick, shrink }) {
@@ -1261,7 +1261,7 @@ function FAB({ onClick, shrink }) {
     <button
       onClick={onClick}
       className={`fixed z-20 w-14 h-14 rounded-full flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 transition-transform duration-300 ${shrink ? 'scale-50' : 'scale-100'}`}
-      style={{ right: '1.25rem', bottom: 'calc(3.25rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
+      style={{ right: '1.25rem', bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
       title="Novo lançamento"
     >
       <Plus size={26} color="#fff" />
