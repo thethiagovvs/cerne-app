@@ -55,11 +55,11 @@ const GLOBAL_STYLES = `
   --primary-dark: #7A9068;
   --primary-soft: #2E3A28;
   --secondary: #8A9B7D;
-  --bg: #1C1B18;
-  --card: #26251F;
-  --border: #38362E;
-  --text: #EDEAE2;
-  --text-soft: #A6A296;
+  --bg: #0D1117;
+  --card: #161B22;
+  --border: #30363D;
+  --text: #E6EDF3;
+  --text-soft: #8B949E;
   --income: #7FB37F;
   --income-soft: #24352A;
   --expense: #D98888;
@@ -73,7 +73,7 @@ const GLOBAL_STYLES = `
 }
 .cerne-root.dark .shadow-soft,
 .cerne-root.dark .shadow-soft-lg { box-shadow: 0 1px 2px rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.3); }
-.cerne-root.dark .skeleton { background: linear-gradient(90deg, #2E2C26 25%, #38362E 37%, #2E2C26 63%); background-size: 400px 100%; }
+.cerne-root.dark .skeleton { background: linear-gradient(90deg, #161B22 25%, #21262D 37%, #161B22 63%); background-size: 400px 100%; }
 /* Os overlays de hover foram pensados pra fundo claro (escurecem levemente) — no escuro, viram
    quase invisíveis. Troca pra um overlay branco sutil só dentro do tema escuro. */
 .cerne-root.dark .hover\:bg-black\/5:hover,
@@ -3875,32 +3875,72 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         {list.length === 0 ? (
           <EmptyState icon={CalendarIcon} title="Nada por aqui" description="Nenhum lançamento encontrado para este mês com esse filtro." />
         ) : (
-          <div className="space-y-1">
-            {list.map((t) => {
-              const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
-              const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
-              return (
-                <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
-                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                      {formatDate(t.date)} · {card ? card.bank : 'Débito'}
-                      {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
-                    </p>
+          <>
+            {/* Mobile: mesmo card com swipe (arraste pra esquerda) usado em Transações, revelando
+                editar/excluir por trás — antes essa aba só tinha a linha larga de desktop. */}
+            <div className="sm:hidden space-y-2">
+              {list.map((t) => {
+                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                return (
+                  <SwipeableRow key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}>
+                    <div className="flex items-center gap-3 p-3">
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
+                            {t.description}
+                            {t.installmentGroupId && <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{t.installmentIndex}/{t.installmentCount}</span>}
+                          </p>
+                          <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
+                          <span className="shrink-0">{formatDate(t.date)}</span>
+                          <span className="shrink-0">·</span>
+                          <span className="truncate">{card ? card.bank : 'Débito'}</span>
+                          {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
+                        </div>
+                        {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
+                          <button onClick={() => setConfirmMarkPaid(t)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
+                            <Check size={12} /> Marcar como pago
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </SwipeableRow>
+                );
+              })}
+              <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>
+            </div>
+
+            {/* Desktop/tablet: linha única, como antes. */}
+            <div className="hidden sm:block space-y-1">
+              {list.map((t) => {
+                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                return (
+                  <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                        {formatDate(t.date)} · {card ? card.bank : 'Débito'}
+                        {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
+                      </p>
+                    </div>
+                    {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
+                    {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
+                      <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                    )}
+                    <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                    {onEditTransaction && (
+                      <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
+                    )}
                   </div>
-                  {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
-                  {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
-                    <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
-                  )}
-                  <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
-                  {onEditTransaction && (
-                    <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </Card>
       {confirmMarkPaid && (
@@ -4856,7 +4896,7 @@ export default function App() {
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     const themeInfo = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.default;
-    if (meta) meta.setAttribute('content', settings.theme === 'dark' ? '#1C1B18' : themeInfo.light);
+    if (meta) meta.setAttribute('content', settings.theme === 'dark' ? '#0D1117' : themeInfo.light);
   }, [settings.theme, settings.colorTheme]);
 
   function addToast(message, type = 'success') {
