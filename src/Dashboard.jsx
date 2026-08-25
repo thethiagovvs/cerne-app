@@ -1253,16 +1253,15 @@ function SyncConflictModal({ date, onUseRemote, onKeepLocal }) {
 
 // Botão flutuante de novo lançamento — só faz sentido em telas onde a barra lateral não fica
 // sempre visível (abaixo do breakpoint lg, ela vira uma gaveta que precisa do menu hambúrguer
-// pra abrir). Fica um pouco acima da base da tela, mais próximo da zona dos toasts do que
-// antes, mas ainda alto o bastante pra não ficar coberto por um toast passageiro.
+// pra abrir). Fica próximo da base da tela.
 // Enquanto o usuário rola a tela ele encolhe pela metade, e volta ao tamanho normal depois
-// de 2s sem nenhum scroll (ver handleContentScroll no App).
+// de 0,75s sem nenhum scroll (ver handleContentScroll no App).
 function FAB({ onClick, shrink }) {
   return (
     <button
       onClick={onClick}
       className={`fixed z-20 w-14 h-14 rounded-full flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 transition-transform duration-300 ${shrink ? 'scale-50' : 'scale-100'}`}
-      style={{ right: '1.25rem', bottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
+      style={{ right: '1.25rem', bottom: 'calc(3.25rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
       title="Novo lançamento"
     >
       <Plus size={26} color="#fff" />
@@ -1605,8 +1604,17 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
             </button>
           </div>
         ) : (
-          <button onClick={() => setSearchExpanded(true)} className="h-11 w-11 box-border rounded-xl hover:bg-black/5 flex items-center justify-center" title="Buscar">
-            <Search size={18} color="var(--text-soft)" />
+          // Estado de repouso: agora mostra a lupa e o texto "Buscar lançamentos..." por
+          // inteiro, como uma caixa de busca de verdade (não só o ícone) — o toque abre o
+          // input de fato editável logo abaixo.
+          <button
+            onClick={() => setSearchExpanded(true)}
+            className="flex items-center gap-2 w-full h-11 box-border pl-3.5 pr-3 rounded-xl focus-ring"
+            style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)' }}
+            title="Buscar"
+          >
+            <Search size={15} className="shrink-0" color="var(--text-soft)" />
+            <span className="text-sm truncate" style={{ color: 'var(--text-soft)' }}>Buscar lançamentos...</span>
           </button>
         )}
       </div>
@@ -4701,13 +4709,13 @@ export default function App() {
   }
 
   // Encolhe o botão + (FAB) enquanto o conteúdo principal está sendo rolado, e devolve o
-  // tamanho normal depois de 2s parado — cada novo scroll reinicia essa contagem.
+  // tamanho normal depois de 0,75s parado — cada novo scroll reinicia essa contagem.
   const [fabScrolling, setFabScrolling] = useState(false);
   const fabScrollTimeoutRef = useRef(null);
   function handleContentScroll() {
     setFabScrolling(true);
     if (fabScrollTimeoutRef.current) clearTimeout(fabScrollTimeoutRef.current);
-    fabScrollTimeoutRef.current = setTimeout(() => setFabScrolling(false), 2000);
+    fabScrollTimeoutRef.current = setTimeout(() => setFabScrolling(false), 750);
   }
   useEffect(() => () => { if (fabScrollTimeoutRef.current) clearTimeout(fabScrollTimeoutRef.current); }, []);
 
