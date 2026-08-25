@@ -1076,10 +1076,13 @@ function IconCircle({ icon: Icon, color, soft, size = 40 }) {
 // trás — usado nas listas mobile no lugar das tabelas largas, que não cabem numa tela de celular.
 // touchAction: 'pan-y' deixa o scroll vertical da página funcionando normalmente enquanto captura
 // o arrasto horizontal.
-function SwipeableRow({ children, onEdit, onDelete }) {
+// deleteConfirm customiza o texto do ConfirmModal ({ title, description }) exibido antes de
+// executar onDelete de verdade — arrastar e tocar em excluir nunca apaga na hora.
+function SwipeableRow({ children, onEdit, onDelete, deleteConfirm }) {
   const ACTIONS_WIDTH = 96;
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const startXRef = useRef(0);
   const startDragXRef = useRef(0);
 
@@ -1106,7 +1109,7 @@ function SwipeableRow({ children, onEdit, onDelete }) {
           </button>
         )}
         {onDelete && (
-          <button onClick={() => { onDelete(); setDragX(0); }} className="flex-1 flex items-center justify-center" style={{ backgroundColor: 'var(--expense)' }} title="Excluir">
+          <button onClick={() => setConfirmingDelete(true)} className="flex-1 flex items-center justify-center" style={{ backgroundColor: 'var(--expense)' }} title="Excluir">
             <Trash2 size={18} color="#fff" />
           </button>
         )}
@@ -1117,13 +1120,21 @@ function SwipeableRow({ children, onEdit, onDelete }) {
       >
         {children}
       </div>
+      {confirmingDelete && (
+        <ConfirmModal
+          title={deleteConfirm?.title || 'Excluir lançamento'}
+          description={deleteConfirm?.description || 'Tem certeza que deseja excluir este item? Essa ação não pode ser desfeita.'}
+          onConfirm={() => { onDelete(); setConfirmingDelete(false); setDragX(0); }}
+          onClose={() => { setConfirmingDelete(false); setDragX(0); }}
+        />
+      )}
     </div>
   );
 }
 
 function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClick, type = 'button', className = '', disabled }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all focus-ring disabled:opacity-50 disabled:cursor-not-allowed';
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm' };
+  const sizes = { sm: 'px-3 py-1.5 text-xs', toolbar: 'px-3 py-2 text-sm', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm' };
   const variants = {
     primary: 'text-white hover:brightness-95 active:brightness-90 shadow-soft',
     secondary: 'border hover:bg-[var(--primary-soft)]',
@@ -1136,7 +1147,7 @@ function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClic
     : {};
   return (
     <button type={type} onClick={onClick} disabled={disabled} style={style} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
-      {Icon && <Icon size={size === 'sm' ? 14 : 16} />}
+      {Icon && <Icon size={size === 'sm' || size === 'toolbar' ? 14 : 16} />}
       {children}
     </button>
   );
@@ -1623,7 +1634,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
         <PeriodSelector period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} />
       </div>
       <div className={`relative shrink-0${searchExpanded ? ' hidden sm:block' : ''}`} ref={notifRef}>
-        <button onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" title="Notificações">
+        <button onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
           <Bell size={18} color="var(--text-soft)" />
           {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
         </button>
@@ -1705,7 +1716,7 @@ function thisMonthSaved(mh) {
   return m.receitas - m.despesas;
 }
 
-function StatCard({ title, value, description, icon: Icon, color, soft, growth, progressPercent, expandableLabel, expandableContent }) {
+function StatCard({ title, value, description, icon: Icon, color, soft, growth, progressPercent, expandableLabel, expandableContent, masked, onToggleMask }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <Card padding="p-5" className="animate-fade-up">
@@ -1721,7 +1732,14 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
           </span>
         )}
       </div>
-      <p className="font-display text-2xl font-bold tabular-nums mb-1" style={{ color: 'var(--text)' }}>{value}</p>
+      <div className="flex items-center gap-2 mb-1">
+        <p className="font-display text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{masked ? '••••••' : value}</p>
+        {onToggleMask && (
+          <button onClick={onToggleMask} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0" title={masked ? 'Mostrar saldo' : 'Ocultar saldo'}>
+            {masked ? <EyeOff size={15} color="var(--text-soft)" /> : <Eye size={15} color="var(--text-soft)" />}
+          </button>
+        )}
+      </div>
       {progressPercent != null && (
         <div className="my-2"><ProgressBar percent={progressPercent} color={color} /></div>
       )}
@@ -1739,19 +1757,20 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
 }
 
 function KPIRow({ kpis, settings, accounts }) {
+  const [hideBalance, setHideBalance] = useState(false);
   const metaPercent = kpis.metaMensal.percent;
   const saldoBreakdown = accounts && accounts.length > 0 && (
     <>
       {accounts.map((a) => (
         <div key={a.id} className="flex items-center justify-between gap-2 text-xs">
           <span className="truncate" style={{ color: 'var(--text-soft)' }}>{a.bank}</span>
-          <span className="tabular-nums font-medium shrink-0" style={{ color: a.balance < 0 ? 'var(--expense)' : 'var(--text)' }}>{formatBRL(a.balance)}</span>
+          <span className="tabular-nums font-medium shrink-0" style={{ color: a.balance < 0 ? 'var(--expense)' : 'var(--text)' }}>{hideBalance ? '••••••' : formatBRL(a.balance)}</span>
         </div>
       ))}
     </>
   );
   const allCards = [
-    { key: 'kpiSaldo', title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)', expandableLabel: 'Ver saldo por conta', expandableContent: saldoBreakdown },
+    { key: 'kpiSaldo', title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)', expandableLabel: 'Ver saldo por conta', expandableContent: saldoBreakdown, masked: hideBalance, onToggleMask: () => setHideBalance((v) => !v) },
     { key: 'kpiReceitas', title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
     { key: 'kpiDespesas', title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
     { key: 'kpiEconomia', title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
@@ -1882,6 +1901,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
   // já que ela ordena por data mais recente primeiro.
   const todayStr = ymd(new Date());
   const recent = transactions.filter((t) => t.date <= todayStr).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+  const [confirmDeleteTx, setConfirmDeleteTx] = useState(null);
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
@@ -1912,12 +1932,20 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
-                  <button onClick={() => onDelete(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
+                  <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+      {confirmDeleteTx && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteTx.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteTx); setConfirmDeleteTx(null); }}
+          onClose={() => setConfirmDeleteTx(null)}
+        />
       )}
     </Card>
   );
@@ -2563,7 +2591,6 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
     isSalary: false, grossSalary: 0, dependents: 0, cardId: null, benefitId: null, benefitType: null,
   });
   const [errors, setErrors] = useState({});
-  const [confirmDelete, setConfirmDelete] = useState(false);
   // Parcelamento só é oferecido ao criar um lançamento novo (editar uma parcela já existente
   // edita só aquela ocorrência — não faz sentido reabrir o plano inteiro).
   const [installmentEnabled, setInstallmentEnabled] = useState(false);
@@ -2818,26 +2845,11 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
           </div>
         </div>
-        <div className="flex items-center justify-between gap-3 pt-2">
-          {initial && onDelete ? (
-            <button onClick={() => setConfirmDelete(true)} className="text-xs font-medium flex items-center gap-1 shrink-0" style={{ color: 'var(--expense)' }}>
-              <Trash2 size={13} /> Excluir lançamento
-            </button>
-          ) : <span />}
-          <div className="flex flex-wrap justify-end gap-3">
-            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-            <Button onClick={handleSubmit}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
-          </div>
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={handleSubmit}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
         </div>
       </div>
-      {confirmDelete && (
-        <ConfirmModal
-          title="Excluir lançamento"
-          description={`Tem certeza que deseja excluir "${initial?.description}"? Essa ação não pode ser desfeita.`}
-          onConfirm={() => { onDelete(initial); onClose(); }}
-          onClose={() => setConfirmDelete(false)}
-        />
-      )}
     </Modal>
   );
 }
@@ -2990,6 +3002,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const filtersRef = useRef(null);
@@ -3156,18 +3169,21 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
           <div className="flex-1" />
           <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
-          <Button variant="secondary" size="sm" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
+          <Button variant="secondary" size="toolbar" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
 
           {/* Telas maiores: botões de exportação individuais. No mobile viram um menu "⋮" — 3
               botões de texto a mais nessa linha eram demais pra uma tela estreita. */}
           <div className="hidden sm:flex items-center gap-2">
-            <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV}>CSV</Button>
-            <Button variant="secondary" size="sm" icon={Download} onClick={exportExcel}>Excel</Button>
-            <Button variant="secondary" size="sm" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
+            <Button variant="secondary" size="toolbar" icon={Download} onClick={exportCSV}>CSV</Button>
+            <Button variant="secondary" size="toolbar" icon={Download} onClick={exportExcel}>Excel</Button>
+            <Button variant="secondary" size="toolbar" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
           </div>
+
+          <Button size="toolbar" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
+
           <div className="relative sm:hidden" ref={exportMenuRef}>
-            <button onClick={() => setShowExportMenu((v) => !v)} className="p-2.5 rounded-xl" style={inputStyle} title="Exportar ou imprimir">
-              <MoreVertical size={16} color="var(--text-soft)" />
+            <button onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center px-3 py-2 rounded-xl" style={inputStyle} title="Exportar ou imprimir">
+              <MoreVertical size={14} color="var(--text-soft)" />
             </button>
             {showExportMenu && (
               <div className="absolute right-0 mt-2 w-48 rounded-xl shadow-soft-lg p-1.5 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
@@ -3177,8 +3193,6 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
               </div>
             )}
           </div>
-
-          <Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
         </div>
         {activeFilterCount > 0 && (
           <div className="flex sm:hidden items-center flex-wrap gap-1.5 mt-2">
@@ -3200,7 +3214,10 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 const card = tx.cardId ? cards.find((c) => c.id === tx.cardId) : null;
                 const accName = accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida';
                 return (
-                  <SwipeableRow key={tx.id} onEdit={() => setEditing(tx)} onDelete={() => onDelete(tx)}>
+                  <SwipeableRow
+                    key={tx.id} onEdit={() => setEditing(tx)} onDelete={() => onDelete(tx)}
+                    deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
+                  >
                     <div className="flex items-center gap-3 p-3">
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
@@ -3267,7 +3284,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                             <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
                           )}
                           <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
-                          <button onClick={() => onDelete(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
+                          <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                         </div>
                       </td>
                     </tr>
@@ -3299,6 +3316,14 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
           variant="primary" confirmLabel="Marcar como pago"
           onConfirm={() => { onMarkPaid(confirmMarkPaid); setConfirmMarkPaid(null); }}
           onClose={() => setConfirmMarkPaid(null)}
+        />
+      )}
+      {confirmDeleteRow && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteRow.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteRow); setConfirmDeleteRow(null); }}
+          onClose={() => setConfirmDeleteRow(null)}
         />
       )}
     </div>
@@ -3763,6 +3788,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> | 'debito'
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
 
   const refDate = useMemo(() => {
@@ -3883,7 +3909,10 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
                 return (
-                  <SwipeableRow key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}>
+                  <SwipeableRow
+                    key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}
+                    deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${t.description}"? Essa ação não pode ser desfeita.` }}
+                  >
                     <div className="flex items-center gap-3 p-3">
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
@@ -3936,6 +3965,9 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                     {onEditTransaction && (
                       <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
                     )}
+                    {onDeleteTransaction && (
+                      <button onClick={() => setConfirmDeleteRow(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir lançamento"><Trash2 size={14} color="var(--expense)" /></button>
+                    )}
                   </div>
                 );
               })}
@@ -3950,6 +3982,14 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           variant="primary" confirmLabel="Marcar como pago"
           onConfirm={() => { onMarkPaid(confirmMarkPaid); setConfirmMarkPaid(null); }}
           onClose={() => setConfirmMarkPaid(null)}
+        />
+      )}
+      {confirmDeleteRow && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteRow.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDeleteTransaction(confirmDeleteRow); setConfirmDeleteRow(null); }}
+          onClose={() => setConfirmDeleteRow(null)}
         />
       )}
       {editingTx && (
@@ -4223,7 +4263,6 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
     ? { ...initial }
     : { name: '', category: 'Lazer', value: 0, renewalDay: 1, cardId: null, accountId: accounts[0]?.id || '' });
   const [error, setError] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const isEditing = !!initial;
 
   function selectPaymentSource(v) {
@@ -4283,26 +4322,11 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
             </button>
           </div>
         )}
-        <div className="flex items-center justify-between gap-3 pt-2">
-          {isEditing && onDelete ? (
-            <button onClick={() => setConfirmDelete(true)} className="text-xs font-medium flex items-center gap-1 shrink-0" style={{ color: 'var(--expense)' }}>
-              <Trash2 size={13} /> Excluir despesa
-            </button>
-          ) : <span />}
-          <div className="flex flex-wrap justify-end gap-3">
-            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-            <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
-          </div>
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
         </div>
       </div>
-      {confirmDelete && (
-        <ConfirmModal
-          title="Excluir despesa recorrente"
-          description={`Tem certeza que deseja excluir "${form.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.`}
-          onConfirm={() => { onDelete(initial); onClose(); }}
-          onClose={() => setConfirmDelete(false)}
-        />
-      )}
     </Modal>
   );
 }
@@ -4310,6 +4334,7 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
 function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, onEdit, onDelete, onLaunchNow }) {
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
   const [activeBarIndex, setActiveBarIndex] = useState(null);
   const total = recurring.reduce((s, r) => s + r.value, 0);
   const byCategory = {};
@@ -4381,36 +4406,72 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
         )}
         <Card className={showChart ? 'lg:col-span-3' : 'lg:col-span-5'}>
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Nova despesa</Button>}>Assinaturas e despesas fixas</SectionTitle>
-          <div>
-            {recurring.map((r, i) => {
-              const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
-              const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
-              const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
-              const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
-              return (
-                <button
-                  key={r.id} onClick={() => setEditingItem(r)}
-                  className="w-full py-3 px-1 text-left hover:bg-black/[0.02] rounded-lg"
-                  style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
-                >
-                  <div className="flex items-start gap-3">
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
+          {recurring.length === 0 ? (
+            <EmptyState icon={RefreshCw} title="Nenhuma despesa recorrente" description="Adicione assinaturas e contas fixas para acompanhar o total mensal." />
+          ) : (
+            <>
+              {/* Mobile: mesmo card com swipe (arraste pra esquerda) usado em Transações,
+                  revelando editar/excluir por trás. */}
+              <div className="sm:hidden space-y-2">
+                {recurring.map((r) => {
+                  const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
+                  const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
+                  const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
+                  const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
+                  return (
+                    <SwipeableRow
+                      key={r.id} onEdit={() => setEditingItem(r)} onDelete={() => onDelete(r)}
+                      deleteConfirm={{ title: 'Excluir despesa recorrente', description: `Tem certeza que deseja excluir "${r.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.` }}
+                    >
+                      <div className="flex items-start gap-3 p-3">
+                        <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
+                            <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                          </div>
+                          <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
+                            <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                            {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </SwipeableRow>
+                  );
+                })}
+                <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste uma despesa pra esquerda para editar ou excluir</p>
+              </div>
+
+              {/* Desktop/tablet: linha única com ícones de ação. */}
+              <div className="hidden sm:block">
+                {recurring.map((r, i) => {
+                  const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
+                  const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
+                  const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
+                  const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
+                  return (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-3 py-3 px-1 hover:bg-black/[0.02] rounded-lg"
+                      style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
+                    >
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                      <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
-                        <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                        <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
+                          <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                          {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
-                        <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
-                        {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
-                      </div>
+                      <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                      <button onClick={() => setEditingItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                      <button onClick={() => setConfirmDeleteItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                     </div>
-                    <Pencil size={14} color="var(--text-soft)" className="shrink-0 mt-1" />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </Card>
       </div>
       {showForm && <RecurringForm accounts={accounts} cards={cards} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
@@ -4420,7 +4481,14 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
           onSave={(f) => { onEdit(f); setEditingItem(null); }}
           onClose={() => setEditingItem(null)}
           onLaunchNow={(f) => { onLaunchNow(f); setEditingItem(null); }}
-          onDelete={(item) => { onDelete(item); setEditingItem(null); }}
+        />
+      )}
+      {confirmDeleteItem && (
+        <ConfirmModal
+          title="Excluir despesa recorrente"
+          description={`Tem certeza que deseja excluir "${confirmDeleteItem.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteItem); setConfirmDeleteItem(null); }}
+          onClose={() => setConfirmDeleteItem(null)}
         />
       )}
     </div>
