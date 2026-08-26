@@ -125,6 +125,22 @@ const GLOBAL_STYLES = `
 @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
 .skeleton { background: linear-gradient(90deg, #EDEAE2 25%, #F7F5EF 37%, #EDEAE2 63%); background-size: 400px 100%; animation: shimmer 1.4s ease-in-out infinite; }
 
+/* Botão flutuante de novo lançamento: ao encolher/expandir (rolagem), gira uma volta
+   rápida seguida de uma segunda volta mais lenta (0%→35% cobre os primeiros 360°,
+   35%→100% cobre os últimos 360° num intervalo bem maior de tempo). */
+@keyframes fabSpinIn {
+  0%   { transform: scale(1) rotate(0deg); }
+  35%  { transform: scale(0.7) rotate(360deg); }
+  100% { transform: scale(0.5) rotate(720deg); }
+}
+@keyframes fabSpinOut {
+  0%   { transform: scale(0.5) rotate(0deg); }
+  35%  { transform: scale(0.85) rotate(360deg); }
+  100% { transform: scale(1) rotate(720deg); }
+}
+.fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
+.fab-spin-out { animation: fabSpinOut 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
+
 /* Explosão sutil de emojis ao completar uma meta — burst rápido inicial, depois flutuação lenta
    e fade out. --tx/--ty/--dur/--delay são definidos por partícula via style inline. */
 @keyframes goalCelebrateParticle {
@@ -1277,7 +1293,7 @@ function FAB({ onClick, shrink }) {
   return (
     <button
       onClick={onClick}
-      className={`fixed z-20 w-14 h-14 rounded-2xl flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 transition-transform duration-300 ease-out ${shrink ? 'scale-50 rotate-12' : 'scale-100 rotate-0'}`}
+      className={`fixed z-20 w-14 h-14 rounded-2xl flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 ${shrink ? 'fab-spin-in' : 'fab-spin-out'}`}
       style={{ right: '1.25rem', bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
       title="Novo lançamento"
     >
