@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area,
@@ -1175,6 +1176,130 @@ function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClic
   );
 }
 
+// Substitui o <select> nativo: no mobile, um <select> normal abre a caixa de opções do
+// próprio sistema operacional (aquela lista cinza padrão, "poluída" e fora do visual do
+// app). O Select abaixo tem a MESMA API de um <select> — value, onChange, disabled, filhos
+// <option> — só que desenha o próprio menu suspenso, então em qualquer lugar do código dá
+// pra trocar a tag <select> por <Select> sem mudar mais nada.
+function flattenSelectChildren(children) {
+  const items = [];
+  React.Children.forEach(children, (child) => {
+    if (!child) return;
+    if (Array.isArray(child)) { items.push(...flattenSelectChildren(child)); return; }
+    if (child.type === 'option') { items.push({ kind: 'option', el: child }); return; }
+    if (child.type === 'optgroup') {
+      items.push({ kind: 'group', label: child.props.label });
+      items.push(...flattenSelectChildren(child.props.children));
+    }
+  });
+  return items;
+}
+
+function optionValue(opt) {
+  // Um <option> sem o atributo value usa o próprio texto como valor — mesmo comportamento
+  // do <select> nativo (usado, por exemplo, em "Conta Corrente" / "Poupança").
+  return opt.props.value !== undefined ? opt.props.value : opt.props.children;
+}
+
+function Select({ children, value, onChange, className = '', style = {}, disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+
+  // O menu é renderizado num portal (direto em document.body) em vez de dentro da árvore
+  // normal — assim ele nunca é cortado por um modal ou card com "overflow: auto/hidden" no
+  // caminho, e sempre fica por cima de tudo. A posição é recalculada (e reajustada pra caber
+  // na tela, abrindo pra cima se necessário) toda vez que o menu abre, faz scroll ou o
+  // viewport muda de tamanho.
+  useEffect(() => {
+    if (!open) return;
+    function updateRect() {
+      if (!triggerRef.current) return;
+      const r = triggerRef.current.getBoundingClientRect();
+      const panelHeight = panelRef.current?.offsetHeight ?? 256;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const openUpward = spaceBelow < panelHeight + 12 && r.top > spaceBelow;
+      setRect({ left: r.left, width: r.width, top: openUpward ? undefined : r.bottom + 6, bottom: openUpward ? window.innerHeight - r.top + 6 : undefined });
+    }
+    updateRect();
+    window.addEventListener('scroll', updateRect, true);
+    window.addEventListener('resize', updateRect);
+    return () => {
+      window.removeEventListener('scroll', updateRect, true);
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e) {
+      if (triggerRef.current?.contains(e.target)) return;
+      if (panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [open]);
+
+  const items = flattenSelectChildren(children);
+  const selectedItem = items.find((it) => it.kind === 'option' && String(optionValue(it.el)) === String(value));
+
+  function pick(opt) {
+    if (opt.props.disabled) return;
+    onChange({ target: { value: optionValue(opt) } });
+    setOpen(false);
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button" disabled={disabled} onClick={() => setOpen((v) => !v)}
+        className={`${className} flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed`}
+        style={style}
+      >
+        <span className="truncate">{selectedItem ? selectedItem.el.props.children : ''}</span>
+        <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} style={{ color: 'var(--text-soft)' }} />
+      </button>
+      {open && rect && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed max-h-64 overflow-y-auto rounded-xl shadow-soft-lg py-1.5 z-[100] animate-fade-up"
+          style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+        >
+          {items.map((it, i) => {
+            if (it.kind === 'group') {
+              return (
+                <p key={`g-${i}`} className={`px-3.5 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                  {it.label}
+                </p>
+              );
+            }
+            const opt = it.el;
+            const isSelected = String(optionValue(opt)) === String(value);
+            return (
+              <button
+                key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
+                className="w-full text-left px-3.5 py-2.5 text-sm flex items-center justify-between gap-2 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ color: isSelected ? 'var(--primary)' : 'var(--text)', fontWeight: isSelected ? 600 : 400 }}
+              >
+                <span className="truncate">{opt.props.children}</span>
+                {isSelected && <Check size={14} className="shrink-0" />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 const Card = React.forwardRef(function Card({ children, className = '', padding = 'p-6' }, ref) {
   return (
     <div ref={ref} className={`rounded-2xl shadow-soft ${padding} ${className}`} style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
@@ -2316,10 +2441,10 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
         </div>
         <div>
           <FieldLabel>Debitar de qual conta?</FieldLabel>
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
+          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
             <option value="">Nenhuma (só marcar como paga)</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          </Select>
           <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
             {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
           </p>
@@ -2823,21 +2948,21 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
               {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </Select>
           </div>
           {form.type === 'receita' ? (
             <div>
               <FieldLabel error={errors.account}>Conta</FieldLabel>
-              <select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
+              <Select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-              </select>
+              </Select>
             </div>
           ) : (
             <div>
               <FieldLabel error={errors.account}>Como foi pago</FieldLabel>
-              <select
+              <Select
                 value={form.cardId ? `card:${form.cardId}` : form.benefitId ? `benefit:${form.benefitId}:${form.benefitType}` : `account:${form.account}`}
                 onChange={(e) => selectPaymentSource(e.target.value)}
                 className={inputClass} style={inputStyle}
@@ -2858,7 +2983,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
                     ])}
                   </optgroup>
                 )}
-              </select>
+              </Select>
             </div>
           )}
         </div>
@@ -2889,15 +3014,15 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Forma de pagamento</FieldLabel>
-            <select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className={inputClass} style={inputStyle}>
               {PAYMENT_METHODS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <select value={form.status} disabled={(installmentEnabled && !initial) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && !initial) || !!form.cardId ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={(installmentEnabled && !initial) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && !initial) || !!form.cardId ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
-            </select>
+            </Select>
             {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
           </div>
         </div>
@@ -2983,14 +3108,14 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
         <div>
           <FieldLabel>{useCard ? 'Lançar no cartão' : 'Lançar na conta'}</FieldLabel>
           {useCard ? (
-            <select value={targetCard} onChange={(e) => setTargetCard(e.target.value)} className={inputClass} style={inputStyle}>
+            <Select value={targetCard} onChange={(e) => setTargetCard(e.target.value)} className={inputClass} style={inputStyle}>
               {cards.map((c) => <option key={c.id} value={c.id}>{c.bank} — {c.brand}</option>)}
-            </select>
+            </Select>
           ) : (
             <>
-              <select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
+              <Select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-              </select>
+              </Select>
               <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Você ainda não cadastrou um cartão — os lançamentos vão debitar essa conta diretamente. Cadastre o cartão em "Cartões" para a fatura ser calculada automaticamente.</p>
             </>
           )}
@@ -3023,9 +3148,9 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
                       {r.isDuplicate && <span className="ml-2 text-xs font-medium" style={{ color: 'var(--alert)' }}>possível duplicata</span>}
                     </td>
                     <td className="py-2 pr-3">
-                      <select value={r.category} onChange={(e) => setRowCategory(r.rowId, e.target.value)} className="px-2 py-1.5 rounded-lg text-base sm:text-xs focus-ring" style={inputStyle}>
+                      <Select value={r.category} onChange={(e) => setRowCategory(r.rowId, e.target.value)} className="px-2 py-1.5 rounded-lg text-base sm:text-xs focus-ring" style={inputStyle}>
                         {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      </Select>
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums" style={{ color: 'var(--expense)' }}>{formatBRL(r.amount)}</td>
                   </tr>
@@ -3177,18 +3302,18 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
             {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
             <div className="hidden sm:flex items-center gap-2">
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+              <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
                 <option value="all">Todas categorias</option>
                 {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+              </Select>
+              <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
                 <option value="all">Todas contas</option>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-              </select>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+              </Select>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
                 <option value="all">Todos status</option>
                 {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="relative sm:hidden" ref={filtersRef}>
               <button
@@ -3206,18 +3331,18 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 // perto da borda direita da tela nesse layout, então abrir pra direita cortava o
                 // conteúdo do popover.
                 <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-3 z-20 space-y-2.5" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                     <option value="all">Todas categorias</option>
                     {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  </Select>
+                  <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                     <option value="all">Todas contas</option>
                     {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-                  </select>
-                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  </Select>
+                  <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                     <option value="all">Todos status</option>
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  </Select>
                   {activeFilterCount > 0 && (
                     <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
                   )}
@@ -3410,10 +3535,10 @@ function AccountForm({ onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Tipo</FieldLabel>
-          <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass} style={inputStyle}>
             <option>Conta Corrente</option>
             <option>Poupança</option>
-          </select>
+          </Select>
         </div>
         <div>
           <FieldLabel>Saldo inicial</FieldLabel>
@@ -3527,9 +3652,9 @@ function CaixinhaForm({ accounts, onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Conta vinculada</FieldLabel>
-          <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-          </select>
+          </Select>
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
@@ -3721,10 +3846,10 @@ function CardForm({ initial, accounts, pendingInvoiceCount = 0, onSave, onDelete
         </div>
         <div>
           <FieldLabel error={errors.accountId}>Conta que paga a fatura</FieldLabel>
-          <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
             {accounts.length === 0 && <option value="">Nenhuma conta cadastrada</option>}
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-          </select>
+          </Select>
         </div>
         <div>
           <FieldLabel error={errors.limit}>Limite total</FieldLabel>
@@ -3908,11 +4033,11 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       </div>
       {cards.length > 0 && (
         <div className="flex justify-center sm:justify-end">
-          <select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
+          <Select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
             <option value="all">Todos os cartões</option>
             {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
             <option value="debito">Só débito (sem cartão)</option>
-          </select>
+          </Select>
         </div>
       )}
 
@@ -4152,9 +4277,9 @@ function InvestmentForm({ initial, onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Categoria</FieldLabel>
-          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
             {INVESTMENT_CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -4344,9 +4469,9 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
               {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <FieldLabel>Dia da renovação</FieldLabel>
@@ -4359,7 +4484,7 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
         </div>
         <div>
           <FieldLabel>Débito ou crédito</FieldLabel>
-          <select value={form.cardId ? `card:${form.cardId}` : `account:${form.accountId}`} onChange={(e) => selectPaymentSource(e.target.value)} className={inputClass} style={inputStyle}>
+          <Select value={form.cardId ? `card:${form.cardId}` : `account:${form.accountId}`} onChange={(e) => selectPaymentSource(e.target.value)} className={inputClass} style={inputStyle}>
             {accounts.length > 0 && (
               <optgroup label="Débito (sai direto da conta)">
                 {accounts.map((a) => <option key={a.id} value={`account:${a.id}`}>{a.bank} ({a.type})</option>)}
@@ -4370,7 +4495,7 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
                 {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.bank} — {c.brand}</option>)}
               </optgroup>
             )}
-          </select>
+          </Select>
           <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>
             {form.cardId ? 'Entra automaticamente nas próximas faturas desse cartão.' : 'Entra automaticamente nos próximos meses como um lançamento pendente na conta.'}
           </p>
