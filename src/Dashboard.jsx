@@ -1220,7 +1220,11 @@ function Popover({ open, onClose, triggerRef, children, width = 'trigger', align
       const margin = 8;
       const vw = window.innerWidth, vh = window.innerHeight;
       const panelWidth = width === 'trigger' ? r.width : Math.min(width, vw - margin * 2);
-      let left = width === 'trigger' ? r.left : (align === 'right' ? r.right - panelWidth : r.left);
+      let left;
+      if (width === 'trigger') left = r.left;
+      else if (align === 'center') left = (vw - panelWidth) / 2;
+      else if (align === 'right') left = r.right - panelWidth;
+      else left = r.left;
       if (left + panelWidth > vw - margin) left = vw - margin - panelWidth;
       if (left < margin) left = margin;
       const spaceBelow = vh - r.bottom - margin;
@@ -1685,7 +1689,7 @@ function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
         <span className="hidden sm:inline">{labels[period]}</span>
         <ChevronDown size={14} color="var(--text-soft)" className="hidden sm:inline" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width={256} align="right" className="p-2">
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width={256} align="center" className="p-2">
         {Object.entries(labels).map(([key, label]) => (
           <button
             key={key}
@@ -1800,7 +1804,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
           <Bell size={18} color="var(--text-soft)" />
           {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
         </button>
-        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="right" className="p-2">
+        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="center" className="p-2">
           {visibleInsights.length === 0 ? (
             <div className="px-3 py-4 text-center">
               <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
@@ -3338,7 +3342,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                   <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
                 )}
               </button>
-              <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="right" className="p-3 space-y-2.5">
+              <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="center" className="p-3 space-y-2.5">
                 <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                   <option value="all">Todas categorias</option>
                   {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -3380,7 +3384,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
               <button ref={exportMenuRef} onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0" style={inputStyle} title="Exportar ou imprimir">
                 <MoreVertical size={14} color="var(--text-soft)" />
               </button>
-              <Popover open={showExportMenu} onClose={() => setShowExportMenu(false)} triggerRef={exportMenuRef} width={192} align="right" className="p-1.5">
+              <Popover open={showExportMenu} onClose={() => setShowExportMenu(false)} triggerRef={exportMenuRef} width={192} align="center" className="p-1.5">
                 <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
                 <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
                 <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
