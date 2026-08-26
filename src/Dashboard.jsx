@@ -127,7 +127,8 @@ const GLOBAL_STYLES = `
 
 /* Botão flutuante de novo lançamento: ao encolher/expandir (rolagem), gira uma volta
    rápida seguida de uma segunda volta mais lenta (0%→35% cobre os primeiros 360°,
-   35%→100% cobre os últimos 360° num intervalo bem maior de tempo). */
+   35%→100% cobre os últimos 360° num intervalo bem maior de tempo). Ao voltar ao
+   tamanho normal, gira só meia volta (180°), de uma vez.  */
 @keyframes fabSpinIn {
   0%   { transform: scale(1) rotate(0deg); }
   35%  { transform: scale(0.7) rotate(360deg); }
@@ -135,7 +136,7 @@ const GLOBAL_STYLES = `
 }
 @keyframes fabSpinOut {
   0%   { transform: scale(0.5) rotate(0deg); }
-  100% { transform: scale(1) rotate(360deg); }
+  100% { transform: scale(1) rotate(180deg); }
 }
 .fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
 .fab-spin-out { animation: fabSpinOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
