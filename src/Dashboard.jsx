@@ -1207,11 +1207,12 @@ function Select({ children, value, onChange, className = '', style = {}, disable
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
 
-  // O menu é renderizado num portal (direto em document.body) em vez de dentro da árvore
-  // normal — assim ele nunca é cortado por um modal ou card com "overflow: auto/hidden" no
-  // caminho, e sempre fica por cima de tudo. A posição é recalculada (e reajustada pra caber
-  // na tela, abrindo pra cima se necessário) toda vez que o menu abre, faz scroll ou o
-  // viewport muda de tamanho.
+  // O menu é renderizado num portal, direto em document.body — assim ele nunca é cortado
+  // por um card/modal com "overflow: hidden/auto" no caminho, e sempre fica por cima de
+  // tudo. O <body> recebe as mesmas classes de tema do .cerne-root (ver App(), mais abaixo)
+  // pra herdar as variáveis de cor certas — sem isso, o menu apareceria branco no escuro. A
+  // posição é recalculada (e reajustada pra caber na tela, abrindo pra cima se precisar)
+  // toda vez que o menu abre ou o viewport muda de tamanho/rola.
   useEffect(() => {
     if (!open) return;
     function updateRect() {
@@ -1231,21 +1232,6 @@ function Select({ children, value, onChange, className = '', style = {}, disable
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleOutside(e) {
-      if (triggerRef.current?.contains(e.target)) return;
-      if (panelRef.current?.contains(e.target)) return;
-      setOpen(false);
-    }
-    document.addEventListener('mousedown', handleOutside);
-    document.addEventListener('touchstart', handleOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      document.removeEventListener('touchstart', handleOutside);
-    };
-  }, [open]);
-
   const items = flattenSelectChildren(children);
   const selectedItem = items.find((it) => it.kind === 'option' && String(optionValue(it.el)) === String(value));
 
@@ -1254,6 +1240,8 @@ function Select({ children, value, onChange, className = '', style = {}, disable
     onChange({ target: { value: optionValue(opt) } });
     setOpen(false);
   }
+
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
 
   return (
     <>
@@ -1266,35 +1254,40 @@ function Select({ children, value, onChange, className = '', style = {}, disable
         <span className="truncate">{selectedItem ? selectedItem.el.props.children : ''}</span>
         <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} style={{ color: 'var(--text-soft)' }} />
       </button>
-      {open && rect && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed max-h-64 overflow-y-auto rounded-xl shadow-soft-lg py-1.5 z-[100] animate-fade-up"
-          style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
-        >
-          {items.map((it, i) => {
-            if (it.kind === 'group') {
+      {open && rect && portalTarget && createPortal(
+        <>
+          {/* Camada invisível atrás do menu: só ela fecha ao tocar fora — assim tocar numa
+              opção ou arrastar pra rolar a lista nunca é interpretado como "clique fora". */}
+          <div className="fixed inset-0 z-[99]" onClick={() => setOpen(false)} />
+          <div
+            ref={panelRef}
+            className="fixed max-h-64 overflow-y-auto overscroll-contain rounded-xl shadow-soft-lg py-1.5 z-[100] animate-fade-up"
+            style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, backgroundColor: 'var(--card)', border: '1px solid var(--border)', WebkitOverflowScrolling: 'touch' }}
+          >
+            {items.map((it, i) => {
+              if (it.kind === 'group') {
+                return (
+                  <p key={`g-${i}`} className={`px-3.5 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                    {it.label}
+                  </p>
+                );
+              }
+              const opt = it.el;
+              const isSelected = String(optionValue(opt)) === String(value);
               return (
-                <p key={`g-${i}`} className={`px-3.5 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
-                  {it.label}
-                </p>
+                <button
+                  key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
+                  className="w-full text-left px-3.5 py-2.5 text-sm flex items-center justify-between gap-2 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ color: isSelected ? 'var(--primary)' : 'var(--text)', fontWeight: isSelected ? 600 : 400 }}
+                >
+                  <span className="truncate">{opt.props.children}</span>
+                  {isSelected && <Check size={14} className="shrink-0" />}
+                </button>
               );
-            }
-            const opt = it.el;
-            const isSelected = String(optionValue(opt)) === String(value);
-            return (
-              <button
-                key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
-                className="w-full text-left px-3.5 py-2.5 text-sm flex items-center justify-between gap-2 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ color: isSelected ? 'var(--primary)' : 'var(--text)', fontWeight: isSelected ? 600 : 400 }}
-              >
-                <span className="truncate">{opt.props.children}</span>
-                {isSelected && <Check size={14} className="shrink-0" />}
-              </button>
-            );
-          })}
-        </div>,
-        document.body
+            })}
+          </div>
+        </>,
+        portalTarget
       )}
     </>
   );
@@ -5595,6 +5588,17 @@ export default function App() {
 
   const colorThemeClass = settings.colorTheme && settings.colorTheme !== 'default' ? ` theme-${settings.colorTheme}` : '';
   const rootClassSuffix = `${colorThemeClass}${settings.theme === 'dark' ? ' dark' : ''}`;
+
+  // O menu do <Select> (e outros portais) é renderizado fora da árvore normal pra nunca
+  // ficar cortado por um card/modal com "overflow: hidden/auto" no caminho. Pra isso, ele
+  // precisa ser anexado fora do .cerne-root (que tem overflow-hidden) — mas as variáveis de
+  // cor do tema (--bg, --card, --border, --text-soft, etc.) só existem dentro do
+  // .cerne-root. Replicando as mesmas classes no <body>, essas variáveis (que são herdadas)
+  // ficam disponíveis em qualquer portal anexado em document.body, no tema certo.
+  useEffect(() => {
+    document.body.className = `cerne-root${rootClassSuffix}`;
+    return () => { document.body.className = ''; };
+  }, [rootClassSuffix]);
 
   const investmentsTotal = useMemo(() => investments.reduce((s, i) => s + i.currentValue, 0), [investments]);
   const realMonthlyHistory = useMemo(
