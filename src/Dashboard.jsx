@@ -135,11 +135,10 @@ const GLOBAL_STYLES = `
 }
 @keyframes fabSpinOut {
   0%   { transform: scale(0.5) rotate(0deg); }
-  35%  { transform: scale(0.85) rotate(360deg); }
-  100% { transform: scale(1) rotate(720deg); }
+  100% { transform: scale(1) rotate(360deg); }
 }
 .fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
-.fab-spin-out { animation: fabSpinOut 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
+.fab-spin-out { animation: fabSpinOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
 /* Explosão sutil de emojis ao completar uma meta — burst rápido inicial, depois flutuação lenta
    e fade out. --tx/--ty/--dur/--delay são definidos por partícula via style inline. */
