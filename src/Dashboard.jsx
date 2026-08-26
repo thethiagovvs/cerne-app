@@ -1258,16 +1258,16 @@ function Select({ children, value, onChange, className = '', style = {}, disable
         <>
           {/* Camada invisível atrás do menu: só ela fecha ao tocar fora — assim tocar numa
               opção ou arrastar pra rolar a lista nunca é interpretado como "clique fora". */}
-          <div className="fixed inset-0 z-[99]" onClick={() => setOpen(false)} />
+          <div data-select-portal className="fixed inset-0 z-[99]" onClick={() => setOpen(false)} />
           <div
-            ref={panelRef}
-            className="fixed max-h-64 overflow-y-auto overscroll-contain rounded-xl shadow-soft-lg py-1.5 z-[100] animate-fade-up"
+            ref={panelRef} data-select-portal
+            className="fixed max-h-[60vh] overflow-y-auto overscroll-contain rounded-2xl shadow-soft-lg py-1 z-[100] animate-fade-up"
             style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, backgroundColor: 'var(--card)', border: '1px solid var(--border)', WebkitOverflowScrolling: 'touch' }}
           >
             {items.map((it, i) => {
               if (it.kind === 'group') {
                 return (
-                  <p key={`g-${i}`} className={`px-3.5 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                  <p key={`g-${i}`} className={`px-4 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
                     {it.label}
                   </p>
                 );
@@ -1277,11 +1277,13 @@ function Select({ children, value, onChange, className = '', style = {}, disable
               return (
                 <button
                   key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
-                  className="w-full text-left px-3.5 py-2.5 text-sm flex items-center justify-between gap-2 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ color: isSelected ? 'var(--primary)' : 'var(--text)', fontWeight: isSelected ? 600 : 400 }}
+                  className="w-full text-left px-4 py-3.5 text-base flex items-center justify-between gap-3 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--text)', borderTop: i > 0 && items[i - 1]?.kind !== 'group' ? '1px solid var(--border)' : 'none' }}
                 >
                   <span className="truncate">{opt.props.children}</span>
-                  {isSelected && <Check size={14} className="shrink-0" />}
+                  <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: isSelected ? 'var(--primary)' : 'var(--border)' }}>
+                    {isSelected && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--primary)' }} />}
+                  </span>
                 </button>
               );
             })}
@@ -1634,7 +1636,15 @@ function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNew
 function useClickOutside(ref, onOutside, active) {
   useEffect(() => {
     if (!active) return;
-    function handle(e) { if (ref.current && !ref.current.contains(e.target)) onOutside(); }
+    function handle(e) {
+      if (!ref.current || ref.current.contains(e.target)) return;
+      // O menu do <Select> é renderizado num portal (fora dessa árvore de elementos), então
+      // tocar numa opção dele conta como "fora" pra esse ref — sem essa checagem, selecionar
+      // algo dentro de um <Select> aninhado (ex: no popover de Filtros) fechava o popover
+      // inteiro antes do clique ser processado.
+      if (e.target.closest?.('[data-select-portal]')) return;
+      onOutside();
+    }
     document.addEventListener('mousedown', handle);
     document.addEventListener('touchstart', handle);
     return () => {
