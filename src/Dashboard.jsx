@@ -3343,20 +3343,20 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 )}
               </button>
               <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="center" className="p-3 space-y-2.5">
-                <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                <Select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                   <option value="all">Todas categorias</option>
                   {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </Select>
-                <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                <Select value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                   <option value="all">Todas contas</option>
                   {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
                 </Select>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                   <option value="all">Todos status</option>
                   {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </Select>
                 {activeFilterCount > 0 && (
-                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); setShowFilters(false); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
                 )}
               </Popover>
             </div>
