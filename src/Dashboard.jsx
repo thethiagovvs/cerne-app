@@ -1201,36 +1201,65 @@ function optionValue(opt) {
   return opt.props.value !== undefined ? opt.props.value : opt.props.children;
 }
 
-function Select({ children, value, onChange, className = '', style = {}, disabled = false }) {
-  const [open, setOpen] = useState(false);
+// Popover genérico usado pelo <Select>, pelo menu "Filtros", pelo menu de exportar, pelo
+// seletor de período e pelas notificações: renderiza num portal (document.body) e calcula a
+// posição a partir da tela toda (não do layout do pai), então nunca fica cortado por um card/
+// modal com "overflow" no caminho. A posição — incluindo altura máxima — é sempre recalculada
+// pra caber inteiro na tela (abrindo pra cima se precisar, encostando na borda se precisar),
+// então nunca sobra conteúdo inacessível fora da viewport. Fecha ao tocar numa camada
+// invisível atrás do painel — nunca ao tocar dentro dele (mesmo arrastando pra rolar).
+function Popover({ open, onClose, triggerRef, children, width = 'trigger', align = 'left', className = '', panelStyle = {} }) {
   const [rect, setRect] = useState(null);
-  const triggerRef = useRef(null);
   const panelRef = useRef(null);
 
-  // O menu é renderizado num portal, direto em document.body — assim ele nunca é cortado
-  // por um card/modal com "overflow: hidden/auto" no caminho, e sempre fica por cima de
-  // tudo. O <body> recebe as mesmas classes de tema do .cerne-root (ver App(), mais abaixo)
-  // pra herdar as variáveis de cor certas — sem isso, o menu apareceria branco no escuro. A
-  // posição é recalculada (e reajustada pra caber na tela, abrindo pra cima se precisar)
-  // toda vez que o menu abre ou o viewport muda de tamanho/rola.
   useEffect(() => {
-    if (!open) return;
-    function updateRect() {
+    if (!open) { setRect(null); return; }
+    function update() {
       if (!triggerRef.current) return;
       const r = triggerRef.current.getBoundingClientRect();
-      const panelHeight = panelRef.current?.offsetHeight ?? 256;
-      const spaceBelow = window.innerHeight - r.bottom;
-      const openUpward = spaceBelow < panelHeight + 12 && r.top > spaceBelow;
-      setRect({ left: r.left, width: r.width, top: openUpward ? undefined : r.bottom + 6, bottom: openUpward ? window.innerHeight - r.top + 6 : undefined });
+      const margin = 8;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const panelWidth = width === 'trigger' ? r.width : Math.min(width, vw - margin * 2);
+      let left = width === 'trigger' ? r.left : (align === 'right' ? r.right - panelWidth : r.left);
+      if (left + panelWidth > vw - margin) left = vw - margin - panelWidth;
+      if (left < margin) left = margin;
+      const spaceBelow = vh - r.bottom - margin;
+      const spaceAbove = r.top - margin;
+      const heightGuess = panelRef.current?.offsetHeight ?? 320;
+      const openBelow = spaceBelow >= Math.min(heightGuess, 160) || spaceBelow >= spaceAbove;
+      if (openBelow) setRect({ left, width: panelWidth, top: r.bottom + 6, maxHeight: Math.max(120, spaceBelow - 6) });
+      else setRect({ left, width: panelWidth, bottom: vh - r.top + 6, maxHeight: Math.max(120, spaceAbove - 6) });
     }
-    updateRect();
-    window.addEventListener('scroll', updateRect, true);
-    window.addEventListener('resize', updateRect);
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
     return () => {
-      window.removeEventListener('scroll', updateRect, true);
-      window.removeEventListener('resize', updateRect);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
     };
-  }, [open]);
+  }, [open, triggerRef, width, align]);
+
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+  if (!open || !rect || !portalTarget) return null;
+
+  return createPortal(
+    <>
+      <div data-select-portal className="fixed inset-0 z-[99]" onClick={onClose} />
+      <div
+        ref={panelRef} data-select-portal
+        className={`fixed overflow-y-auto overscroll-contain rounded-xl shadow-soft-lg z-[100] animate-fade-up ${className}`}
+        style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, maxHeight: rect.maxHeight, backgroundColor: 'var(--card)', border: '1px solid var(--border)', WebkitOverflowScrolling: 'touch', ...panelStyle }}
+      >
+        {children}
+      </div>
+    </>,
+    portalTarget
+  );
+}
+
+function Select({ children, value, onChange, className = '', style = {}, disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
 
   const items = flattenSelectChildren(children);
   const selectedItem = items.find((it) => it.kind === 'option' && String(optionValue(it.el)) === String(value));
@@ -1240,8 +1269,6 @@ function Select({ children, value, onChange, className = '', style = {}, disable
     onChange({ target: { value: optionValue(opt) } });
     setOpen(false);
   }
-
-  const portalTarget = typeof document !== 'undefined' ? document.body : null;
 
   return (
     <>
@@ -1254,43 +1281,31 @@ function Select({ children, value, onChange, className = '', style = {}, disable
         <span className="truncate">{selectedItem ? selectedItem.el.props.children : ''}</span>
         <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} style={{ color: 'var(--text-soft)' }} />
       </button>
-      {open && rect && portalTarget && createPortal(
-        <>
-          {/* Camada invisível atrás do menu: só ela fecha ao tocar fora — assim tocar numa
-              opção ou arrastar pra rolar a lista nunca é interpretado como "clique fora". */}
-          <div data-select-portal className="fixed inset-0 z-[99]" onClick={() => setOpen(false)} />
-          <div
-            ref={panelRef} data-select-portal
-            className="fixed max-h-[60vh] overflow-y-auto overscroll-contain rounded-2xl shadow-soft-lg py-1 z-[100] animate-fade-up"
-            style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, backgroundColor: 'var(--card)', border: '1px solid var(--border)', WebkitOverflowScrolling: 'touch' }}
-          >
-            {items.map((it, i) => {
-              if (it.kind === 'group') {
-                return (
-                  <p key={`g-${i}`} className={`px-4 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
-                    {it.label}
-                  </p>
-                );
-              }
-              const opt = it.el;
-              const isSelected = String(optionValue(opt)) === String(value);
-              return (
-                <button
-                  key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
-                  className="w-full text-left px-4 py-3.5 text-base flex items-center justify-between gap-3 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ color: 'var(--text)', borderTop: i > 0 && items[i - 1]?.kind !== 'group' ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span className="truncate">{opt.props.children}</span>
-                  <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: isSelected ? 'var(--primary)' : 'var(--border)' }}>
-                    {isSelected && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--primary)' }} />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>,
-        portalTarget
-      )}
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width="trigger" className="rounded-2xl py-1">
+        {items.map((it, i) => {
+          if (it.kind === 'group') {
+            return (
+              <p key={`g-${i}`} className={`px-4 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                {it.label}
+              </p>
+            );
+          }
+          const opt = it.el;
+          const isSelected = String(optionValue(opt)) === String(value);
+          return (
+            <button
+              key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
+              className="w-full text-left px-4 py-3.5 text-base flex items-center justify-between gap-3 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ color: 'var(--text)', borderTop: i > 0 && items[i - 1]?.kind !== 'group' ? '1px solid var(--border)' : 'none' }}
+            >
+              <span className="truncate">{opt.props.children}</span>
+              <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: isSelected ? 'var(--primary)' : 'var(--border)' }}>
+                {isSelected && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--primary)' }} />}
+              </span>
+            </button>
+          );
+        })}
+      </Popover>
     </>
   );
 }
@@ -1656,12 +1671,12 @@ function useClickOutside(ref, onOutside, active) {
 
 function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false), open);
+  const triggerRef = useRef(null);
   const labels = { mes: 'Este mês', trimestre: 'Trimestre', ano: 'Ano', personalizado: 'Personalizado' };
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={triggerRef}
         onClick={() => setOpen(!open)} title={labels[period]}
         className="flex items-center gap-2 h-11 box-border px-3 sm:px-3.5 rounded-xl text-sm font-medium focus-ring"
         style={{ border: '1px solid var(--border)', color: 'var(--text)' }}
@@ -1670,35 +1685,32 @@ function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
         <span className="hidden sm:inline">{labels[period]}</span>
         <ChevronDown size={14} color="var(--text-soft)" className="hidden sm:inline" />
       </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-2 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-          {Object.entries(labels).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => { setPeriod(key); if (key !== 'personalizado') setOpen(false); }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-[var(--primary-soft)]"
-              style={{ color: period === key ? 'var(--primary-dark)' : 'var(--text)', fontWeight: period === key ? 600 : 400 }}
-            >
-              {label}
-            </button>
-          ))}
-          {period === 'personalizado' && (
-            <div className="p-2 space-y-2 border-t mt-1" style={{ borderColor: 'var(--border)' }}>
-              <input type="date" value={customRange.start} onChange={(e) => setCustomRange((r) => ({ ...r, start: e.target.value }))} className={inputClass} style={inputStyle} />
-              <input type="date" value={customRange.end} onChange={(e) => setCustomRange((r) => ({ ...r, end: e.target.value }))} className={inputClass} style={inputStyle} />
-              <Button size="sm" className="w-full" onClick={() => setOpen(false)}>Aplicar</Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width={256} align="right" className="p-2">
+        {Object.entries(labels).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => { setPeriod(key); if (key !== 'personalizado') setOpen(false); }}
+            className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-[var(--primary-soft)]"
+            style={{ color: period === key ? 'var(--primary-dark)' : 'var(--text)', fontWeight: period === key ? 600 : 400 }}
+          >
+            {label}
+          </button>
+        ))}
+        {period === 'personalizado' && (
+          <div className="p-2 space-y-2 border-t mt-1" style={{ borderColor: 'var(--border)' }}>
+            <input type="date" value={customRange.start} onChange={(e) => setCustomRange((r) => ({ ...r, start: e.target.value }))} className={inputClass} style={inputStyle} />
+            <input type="date" value={customRange.end} onChange={(e) => setCustomRange((r) => ({ ...r, end: e.target.value }))} className={inputClass} style={inputStyle} />
+            <Button size="sm" className="w-full" onClick={() => setOpen(false)}>Aplicar</Button>
+          </div>
+        )}
+      </Popover>
+    </>
   );
 }
 
 function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen, insights }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
-  useClickOutside(notifRef, () => setNotifOpen(false), notifOpen);
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [dismissed, setDismissed] = useState(() => {
     try { return new Set(JSON.parse(window.localStorage.getItem('cerne-dismissed-notifications-v1')) || []); } catch { return new Set(); }
@@ -1783,33 +1795,31 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
       <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
         <PeriodSelector period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} />
       </div>
-      <div className={`relative shrink-0${searchExpanded ? ' hidden sm:block' : ''}`} ref={notifRef}>
-        <button onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
+      <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
+        <button ref={notifRef} onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
           <Bell size={18} color="var(--text-soft)" />
           {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
         </button>
-        {notifOpen && (
-          <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-2 z-20 max-h-80 overflow-y-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-            {visibleInsights.length === 0 ? (
-              <div className="px-3 py-4 text-center">
-                <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
-              </div>
-            ) : (
-              visibleInsights.map((n, i) => {
-                const Icon = n.icon || Info;
-                return (
-                  <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
-                    <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
-                    <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
-                    <button onClick={() => dismissNotification(n.text)} className="p-2 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
-                      <X size={13} color="var(--text-soft)" />
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="right" className="p-2">
+          {visibleInsights.length === 0 ? (
+            <div className="px-3 py-4 text-center">
+              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
+            </div>
+          ) : (
+            visibleInsights.map((n, i) => {
+              const Icon = n.icon || Info;
+              return (
+                <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
+                  <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
+                  <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
+                  <button onClick={() => dismissNotification(n.text)} className="p-2 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
+                    <X size={13} color="var(--text-soft)" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </Popover>
       </div>
     </header>
   );
@@ -3191,8 +3201,6 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
   const [showExportMenu, setShowExportMenu] = useState(false);
   const filtersRef = useRef(null);
   const exportMenuRef = useRef(null);
-  useClickOutside(filtersRef, () => setShowFilters(false), showFilters);
-  useClickOutside(exportMenuRef, () => setShowExportMenu(false), showExportMenu);
   const activeFilterCount = [categoryFilter, accountFilter, statusFilter].filter((f) => f !== 'all').length;
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
@@ -3318,8 +3326,9 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </div>
-            <div className="relative sm:hidden" ref={filtersRef}>
+            <div className="sm:hidden">
               <button
+                ref={filtersRef}
                 onClick={() => setShowFilters((v) => !v)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
                 style={inputStyle}
@@ -3329,28 +3338,23 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                   <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
                 )}
               </button>
-              {showFilters && (
-                // Abre para a esquerda (right-0) em vez de para a direita: o botão "Filtros" fica
-                // perto da borda direita da tela nesse layout, então abrir pra direita cortava o
-                // conteúdo do popover.
-                <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-3 z-20 space-y-2.5" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                  <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                    <option value="all">Todas categorias</option>
-                    {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </Select>
-                  <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                    <option value="all">Todas contas</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-                  </Select>
-                  <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                    <option value="all">Todos status</option>
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </Select>
-                  {activeFilterCount > 0 && (
-                    <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
-                  )}
-                </div>
-              )}
+              <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="right" className="p-3 space-y-2.5">
+                <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todas categorias</option>
+                  {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+                <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todas contas</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
+                </Select>
+                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todos status</option>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+                {activeFilterCount > 0 && (
+                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                )}
+              </Popover>
             </div>
           </div>
 
@@ -3372,17 +3376,15 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
             <Button size="toolbar" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
 
-            <div className="relative sm:hidden" ref={exportMenuRef}>
-              <button onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0" style={inputStyle} title="Exportar ou imprimir">
+            <div className="sm:hidden">
+              <button ref={exportMenuRef} onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0" style={inputStyle} title="Exportar ou imprimir">
                 <MoreVertical size={14} color="var(--text-soft)" />
               </button>
-              {showExportMenu && (
-                <div className="absolute right-0 mt-2 w-48 rounded-xl shadow-soft-lg p-1.5 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                  <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
-                  <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
-                  <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
-                </div>
-              )}
+              <Popover open={showExportMenu} onClose={() => setShowExportMenu(false)} triggerRef={exportMenuRef} width={192} align="right" className="p-1.5">
+                <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
+                <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
+                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
+              </Popover>
             </div>
           </div>
         </div>
