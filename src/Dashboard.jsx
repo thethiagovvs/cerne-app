@@ -1134,7 +1134,13 @@ function SwipeableRow({ children, onEdit, onDelete, deleteConfirm }) {
 
 function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClick, type = 'button', className = '', disabled }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all focus-ring disabled:opacity-50 disabled:cursor-not-allowed';
-  const sizes = { sm: 'px-3 py-1.5 text-xs', toolbar: 'px-3 py-2 text-sm', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm' };
+  const sizes = {
+    sm: 'px-3 py-1.5 text-xs',
+    // Compacto no mobile (cabe "Importar fatura" + "Novo" + "⋮" numa linha só sem
+    // estourar pra uma 3ª linha) e no tamanho normal a partir do breakpoint sm.
+    toolbar: 'px-2.5 py-1.5 text-xs sm:px-3 sm:py-2 sm:text-sm',
+    md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm',
+  };
   const variants = {
     primary: 'text-white hover:brightness-95 active:brightness-90 shadow-soft',
     secondary: 'border hover:bg-[var(--primary-soft)]',
@@ -1271,7 +1277,7 @@ function FAB({ onClick, shrink }) {
   return (
     <button
       onClick={onClick}
-      className={`fixed z-20 w-14 h-14 rounded-full flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 transition-transform duration-300 ${shrink ? 'scale-50' : 'scale-100'}`}
+      className={`fixed z-20 w-14 h-14 rounded-2xl flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 transition-transform duration-300 ease-out ${shrink ? 'scale-50 rotate-12' : 'scale-100 rotate-0'}`}
       style={{ right: '1.25rem', bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
       title="Novo lançamento"
     >
@@ -1910,34 +1916,68 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
       {recent.length === 0 ? (
         <EmptyState icon={ArrowLeftRight} title="Nenhum lançamento ainda" description="Seus lançamentos mais recentes aparecem aqui." />
       ) : (
-        <div className="space-y-1">
-          {recent.map((tx) => {
-            const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
-            return (
-              <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
-                <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
-                    {tx.description}
-                    {tx.installmentGroupId && (
-                      <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                        {tx.installmentIndex}/{tx.installmentCount}
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+        <>
+          {/* Mobile: swipe pra esquerda revela editar/excluir, como nas outras listas de lançamentos. */}
+          <div className="sm:hidden space-y-2">
+            {recent.map((tx) => {
+              const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              return (
+                <SwipeableRow
+                  key={tx.id} onEdit={() => onEdit(tx)} onDelete={() => setConfirmDeleteTx(tx)}
+                  deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
+                >
+                  <div className="flex items-center gap-3 p-2">
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
+                        {tx.description}
+                        {tx.installmentGroupId && (
+                          <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                            {tx.installmentIndex}/{tx.installmentCount}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                    </div>
+                    <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
+                      {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
+                    </span>
+                  </div>
+                </SwipeableRow>
+              );
+            })}
+          </div>
+
+          {/* Desktop/tablet: linha única com ícones de ação, como antes. */}
+          <div className="hidden sm:block space-y-1">
+            {recent.map((tx) => {
+              const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              return (
+                <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
+                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
+                      {tx.description}
+                      {tx.installmentGroupId && (
+                        <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                          {tx.installmentIndex}/{tx.installmentCount}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                  </div>
+                  <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
+                    {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
+                    <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
+                  </div>
                 </div>
-                <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
-                  {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
-                </span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
-                  <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
       {confirmDeleteTx && (
         <ConfirmModal
@@ -3111,87 +3151,95 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
       )}
 
       <Card padding="p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2 no-print">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar..." className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
-          </div>
+        <div className="space-y-2 no-print">
+          {/* Linha 1: busca + filtros. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar..." className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+            </div>
 
-          {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
-          <div className="hidden sm:flex items-center gap-2">
-            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-              <option value="all">Todas categorias</option>
-              {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-              <option value="all">Todas contas</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-            </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-              <option value="all">Todos status</option>
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="relative sm:hidden" ref={filtersRef}>
-            <button
-              onClick={() => setShowFilters((v) => !v)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
-              style={inputStyle}
-            >
-              <Filter size={14} color="var(--text-soft)" /> Filtros
-              {activeFilterCount > 0 && (
-                <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
-              )}
-            </button>
-            {showFilters && (
-              // Abre para a esquerda (right-0) em vez de para a direita: o botão "Filtros" fica
-              // perto da borda direita da tela nesse layout, então abrir pra direita cortava o
-              // conteúdo do popover.
-              <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-3 z-20 space-y-2.5" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                  <option value="all">Todas categorias</option>
-                  {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                  <option value="all">Todas contas</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-                </select>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
-                  <option value="all">Todos status</option>
-                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+            {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
+            <div className="hidden sm:flex items-center gap-2">
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todas categorias</option>
+                {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todas contas</option>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
+              </select>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todos status</option>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="relative sm:hidden" ref={filtersRef}>
+              <button
+                onClick={() => setShowFilters((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+                style={inputStyle}
+              >
+                <Filter size={14} color="var(--text-soft)" /> Filtros
                 {activeFilterCount > 0 && (
-                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                  <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
                 )}
-              </div>
-            )}
+              </button>
+              {showFilters && (
+                // Abre para a esquerda (right-0) em vez de para a direita: o botão "Filtros" fica
+                // perto da borda direita da tela nesse layout, então abrir pra direita cortava o
+                // conteúdo do popover.
+                <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl shadow-soft-lg p-3 z-20 space-y-2.5" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                    <option value="all">Todas categorias</option>
+                    {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                    <option value="all">Todas contas</option>
+                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
+                  </select>
+                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                    <option value="all">Todos status</option>
+                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  {activeFilterCount > 0 && (
+                    <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="flex-1" />
-          <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
-          <Button variant="secondary" size="toolbar" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
+          {/* Linha 2: importar, exportar/imprimir e novo lançamento — sempre nessa linha,
+              nunca estoura pra uma 3ª (tamanhos compactos no mobile garantem isso). */}
+          <div className="flex items-center gap-2">
+            <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
+            <Button variant="secondary" size="toolbar" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
 
-          {/* Telas maiores: botões de exportação individuais. No mobile viram um menu "⋮" — 3
-              botões de texto a mais nessa linha eram demais pra uma tela estreita. */}
-          <div className="hidden sm:flex items-center gap-2">
-            <Button variant="secondary" size="toolbar" icon={Download} onClick={exportCSV}>CSV</Button>
-            <Button variant="secondary" size="toolbar" icon={Download} onClick={exportExcel}>Excel</Button>
-            <Button variant="secondary" size="toolbar" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
-          </div>
+            {/* Telas maiores: botões de exportação individuais. No mobile viram um menu "⋮" — 3
+                botões de texto a mais nessa linha eram demais pra uma tela estreita. */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button variant="secondary" size="toolbar" icon={Download} onClick={exportCSV}>CSV</Button>
+              <Button variant="secondary" size="toolbar" icon={Download} onClick={exportExcel}>Excel</Button>
+              <Button variant="secondary" size="toolbar" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
+            </div>
 
-          <Button size="toolbar" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
+            <div className="flex-1" />
 
-          <div className="relative sm:hidden" ref={exportMenuRef}>
-            <button onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center px-3 py-2 rounded-xl" style={inputStyle} title="Exportar ou imprimir">
-              <MoreVertical size={14} color="var(--text-soft)" />
-            </button>
-            {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-48 rounded-xl shadow-soft-lg p-1.5 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
-                <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
-                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
-              </div>
-            )}
+            <Button size="toolbar" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
+
+            <div className="relative sm:hidden" ref={exportMenuRef}>
+              <button onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0" style={inputStyle} title="Exportar ou imprimir">
+                <MoreVertical size={14} color="var(--text-soft)" />
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-2 w-48 rounded-xl shadow-soft-lg p-1.5 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+                  <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
+                  <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
+                  <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {activeFilterCount > 0 && (
