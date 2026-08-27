@@ -4574,12 +4574,12 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
             {/* Sem rótulos no eixo — com muitas categorias, texto espremido do lado das barras
                 fica ilegível (cortado). A leitura fica por conta da legenda com cores abaixo,
                 igual ao gráfico de pizza. */}
-            <div style={{ width: '100%', height: Math.max(90, chartData.length * 34) }}>
+            <div style={{ width: '100%', height: Math.max(96, chartData.length * 38) }}>
               <ResponsiveContainer>
-                <BarChart data={chartData} layout="vertical" margin={{ left: 4, right: 4, top: 4, bottom: 4 }} barCategoryGap={12} onMouseLeave={() => setActiveBarIndex(null)}>
+                <BarChart data={chartData} layout="vertical" margin={{ left: 4, right: 4, top: 4, bottom: 4 }} barCategoryGap={14} onMouseLeave={() => setActiveBarIndex(null)}>
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="name" hide />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]}
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={22}
                     onClick={(_, i) => setActiveBarIndex((cur) => (cur === i ? null : i))}
                   >
                     {chartData.map((entry, i) => (
@@ -5650,15 +5650,24 @@ export default function App() {
   }, [search, transactions]);
 
   // Resumo dos valores encontrados na busca — soma pelo total filtrado, não só pelos
-  // 10 primeiros resultados exibidos na lista.
+  // 10 primeiros resultados exibidos na lista. Considera só o que já venceu até hoje: uma
+  // compra parcelada (ex: "TV" em 10x) já gera as 10 parcelas como lançamentos futuros no
+  // array, então somar tudo daria o valor total da compra, não o que de fato já foi gasto
+  // até agora. As parcelas futuras aparecem à parte, não somadas ao total.
   const searchTotals = useMemo(() => {
     if (!filteredForSearch || filteredForSearch.length === 0) return null;
-    const despesas = filteredForSearch.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
-    const receitas = filteredForSearch.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
-    return [
+    const todayStr = ymd(new Date());
+    const realized = filteredForSearch.filter((t) => t.date <= todayStr);
+    const future = filteredForSearch.filter((t) => t.date > todayStr);
+    const despesas = realized.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
+    const receitas = realized.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
+    const futureTotal = future.reduce((s, t) => s + t.amount, 0);
+    const parts = [
       despesas > 0 ? `Total gasto: ${formatBRL(despesas)}` : null,
       receitas > 0 ? `Total recebido: ${formatBRL(receitas)}` : null,
-    ].filter(Boolean).join(' · ');
+    ].filter(Boolean);
+    if (future.length > 0) parts.push(`${future.length} parcela(s) futura(s) — ${formatBRL(futureTotal)}`);
+    return parts.join(' · ');
   }, [filteredForSearch]);
 
   // Tonalidades dos cartões de crédito derivadas da cor de destaque escolhida em Configurações
