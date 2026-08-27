@@ -1747,7 +1747,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
         <div className="relative w-full max-w-sm min-w-0">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input
-            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos..."
+            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
             className="w-full pl-9 pr-9 py-2 rounded-xl text-base sm:text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
           />
           {search && (
@@ -1770,7 +1770,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
             <input
               autoFocus
-              value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos..."
+              value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
               className="w-full h-11 box-border pl-9 pr-9 text-base focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
             />
             <button
@@ -1781,9 +1781,11 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
             </button>
           </div>
         ) : (
-          // Estado de repouso: agora mostra a lupa e o texto "Buscar lançamentos..." por
+          // Estado de repouso: agora mostra a lupa e o texto "Buscar lançamentos" por
           // inteiro, como uma caixa de busca de verdade (não só o ícone) — o toque abre o
-          // input de fato editável logo abaixo.
+          // input de fato editável logo abaixo. Fonte um pouco menor (text-xs) pra caber
+          // sem cortar o texto nessa largura reduzida, dividida com os outros ícones do
+          // cabeçalho.
           <button
             onClick={() => setSearchExpanded(true)}
             className="flex items-center gap-2 w-full h-11 box-border pl-3.5 pr-3 rounded-xl focus-ring"
@@ -1791,7 +1793,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
             title="Buscar"
           >
             <Search size={15} className="shrink-0" color="var(--text-soft)" />
-            <span className="text-sm truncate" style={{ color: 'var(--text-soft)' }}>Buscar lançamentos...</span>
+            <span className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>Buscar lançamentos</span>
           </button>
         )}
       </div>
@@ -1896,8 +1898,8 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
           </span>
         )}
       </div>
-      <div className="flex items-center gap-2 mb-1">
-        <p className="font-display text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{masked ? '••••••' : value}</p>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <p className="font-display text-2xl font-bold tabular-nums truncate" style={{ color: 'var(--text)' }}>{masked ? '••••••' : value}</p>
         {onToggleMask && (
           <button onClick={onToggleMask} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0" title={masked ? 'Mostrar saldo' : 'Ocultar saldo'}>
             {masked ? <EyeOff size={15} color="var(--text-soft)" /> : <Eye size={15} color="var(--text-soft)" />}
@@ -2398,19 +2400,21 @@ function FinancialCalendar({ cards, transactions }) {
     if (!current || typePriority[e.type] > typePriority[current]) dayDominantType[e.day] = e.type;
   });
 
+  const now = new Date();
+  const monthOffset = (year - now.getFullYear()) * 12 + (month - now.getMonth());
+
   return (
     <Card className="animate-fade-up">
-      <SectionTitle
-        action={
-          <div className="flex items-center gap-1">
-            <button onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-black/5"><ChevronLeft size={16} /></button>
-            <span className="text-xs font-medium w-24 text-center" style={{ color: 'var(--text-soft)' }}>{capitalizeFirst(viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</span>
-            <button onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-2 rounded-lg hover:bg-black/5"><ChevronRight size={16} /></button>
-          </div>
-        }
-      >
-        Calendário financeiro
-      </SectionTitle>
+      <SectionTitle>Calendário financeiro</SectionTitle>
+      <div className="flex justify-center mb-3">
+        <MonthNavigator
+          label={capitalizeFirst(viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}
+          monthOffset={monthOffset}
+          onPrev={() => setViewDate(new Date(year, month - 1, 1))}
+          onNext={() => setViewDate(new Date(year, month + 1, 1))}
+          onToday={() => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1))}
+        />
+      </div>
       <div className="grid grid-cols-7 gap-1 mb-3">
         {weekDays.map((d, i) => <div key={i} className="text-center text-[11px] font-medium py-1" style={{ color: 'var(--text-soft)' }}>{d}</div>)}
         {cells.map((c) => (
@@ -3308,11 +3312,15 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
       <Card padding="p-4 sm:p-5">
         <div className="space-y-2 no-print">
-          {/* Linha 1: busca + filtros. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[180px]">
+          {/* Linha 1: busca + filtros. flex-nowrap de propósito — com flex-wrap, ao aparecer o
+              badge de contagem no botão "Filtros" ele deixava de caber ao lado da busca (que
+              tinha uma largura mínima de 180px) e quebrava sozinho pra uma 2ª linha, enquanto a
+              busca esticava pra ocupar a linha inteira. Com min-w-0 no mobile, a busca encolhe
+              o quanto for preciso pra sempre sobrar espaço pro botão de filtros do lado. */}
+          <div className="flex flex-nowrap items-center gap-2">
+            <div className="relative flex-1 min-w-0 sm:min-w-[180px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar..." className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
             </div>
 
             {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
@@ -3330,7 +3338,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </div>
-            <div className="sm:hidden">
+            <div className="sm:hidden shrink-0">
               <button
                 ref={filtersRef}
                 onClick={() => setShowFilters((v) => !v)}
@@ -3429,7 +3437,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
                           <span className="shrink-0">{formatDate(tx.date)}</span>
                           <span className="shrink-0">·</span>
-                          <span className="truncate">{card ? `${card.bank} (Crédito)` : `${accName} (Débito)`}</span>
+                          <span className="truncate">{card ? `Crédito · ${card.bank}` : `Débito · ${accName}`}</span>
                         </div>
                         {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
                           <button onClick={() => setConfirmMarkPaid(tx)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
