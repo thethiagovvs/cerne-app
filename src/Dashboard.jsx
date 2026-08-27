@@ -129,7 +129,9 @@ const GLOBAL_STYLES = `
 /* Botão flutuante de novo lançamento: ao encolher/expandir (rolagem), gira uma volta
    rápida seguida de uma segunda volta mais lenta (0%→35% cobre os primeiros 360°,
    35%→100% cobre os últimos 360° num intervalo bem maior de tempo). Ao voltar ao
-   tamanho normal, gira só meia volta (180°), de uma vez.  */
+   tamanho normal, gira meia volta (180°) no sentido CONTRÁRIO ao do encolhimento —
+   como um beliscão/elástico voltando, em vez de continuar girando pra sempre no
+   mesmo sentido.  */
 @keyframes fabSpinIn {
   0%   { transform: scale(1) rotate(0deg); }
   35%  { transform: scale(0.7) rotate(360deg); }
@@ -137,7 +139,7 @@ const GLOBAL_STYLES = `
 }
 @keyframes fabSpinOut {
   0%   { transform: scale(0.5) rotate(0deg); }
-  100% { transform: scale(1) rotate(180deg); }
+  100% { transform: scale(1) rotate(-180deg); }
 }
 .fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
 .fab-spin-out { animation: fabSpinOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
@@ -449,7 +451,11 @@ function computeCategoryTotalsForPeriod(transactions, period, customRange) {
   const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
   const now = new Date();
   const startStr = ymd(new Date(now.getFullYear(), now.getMonth() - (monthsToTake - 1), 1));
-  transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= startStr).forEach(add);
+  // Limite superior = fim do mês atual. Sem isso, as recorrências e parcelas já pré-geradas no
+  // array de transações (até 12 meses à frente) entravam na soma, contando meses que ainda nem
+  // aconteceram e inflando muito o total de categorias com gasto recorrente.
+  const endStr = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+  transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= startStr && t.date <= endStr).forEach(add);
   return totals;
 }
 
@@ -2505,6 +2511,53 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
   );
 }
 
+// Versão compacta do cartão pra aba Fatura mensal — uma linha só, em vez do card grande (esse
+// já existe por inteiro na aba "Meus cartões", incluindo limite, vencimento e antecipar
+// parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
+// esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
+// como um botão pequeno embutido na própria linha.
+function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, isCurrentMonth, viewedCycle, onPayInvoice }) {
+  const [showPayModal, setShowPayModal] = useState(false);
+  const { invoice, count } = useMemo(() => {
+    if (!isCurrentMonth) {
+      const items = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
+        && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })());
+      return { invoice: items.reduce((s, t) => s + t.amount, 0), count: items.length };
+    }
+    const cutoff = ymd(getNextCardDueDate(card));
+    const items = transactions.filter((t) => t.cardId === card.id && t.type === 'despesa'
+      && (!card.paidThroughDate || t.date > card.paidThroughDate) && t.date <= cutoff);
+    return { invoice: items.reduce((s, t) => s + t.amount, 0), count: items.length };
+  }, [card, transactions, isCurrentMonth, viewedCycle?.year, viewedCycle?.month]);
+
+  return (
+    <div
+      role="button" tabIndex={0}
+      onClick={onToggleSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleSelect(); } }}
+      className="w-full flex items-center gap-3 p-3 rounded-xl text-left cursor-pointer transition-colors focus-ring"
+      style={{ backgroundColor: 'var(--card)', border: selected ? '2px solid var(--primary)' : '1px solid var(--border)' }}
+    >
+      <IconCircle icon={CreditCard} color="var(--invest)" soft="var(--invest-soft)" size={36} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {count} lançamento{count === 1 ? '' : 's'}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(invoice)}</p>
+        {isCurrentMonth && (invoice > 0 ? (
+          <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-[11px] font-medium underline" style={{ color: 'var(--primary)' }}>Pagar fatura</button>
+        ) : (
+          <span className="text-[11px] font-medium flex items-center justify-end gap-1" style={{ color: 'var(--income)' }}><Check size={10} /> Em dia</span>
+        ))}
+      </div>
+      {showPayModal && (
+        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, invoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
+      )}
+    </div>
+  );
+}
+
 function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onEdit, onDelete, viewedCycle }) {
   // viewedCycle: opcional { year, month, label } — quando presente (navegação por mês na aba
   // Fatura), mostra o total da fatura daquele ciclo específico, não necessariamente a fatura
@@ -3531,8 +3584,8 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
           <div className="flex items-center justify-between mt-4 no-print">
             <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Página {page} de {totalPages} · {sorted.length} lançamentos</p>
             <div className="flex items-center gap-1">
-              <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40"><ChevronLeft size={16} /></button>
-              <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40"><ChevronRight size={16} /></button>
+              <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }}><ChevronLeft size={16} /></button>
+              <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }}><ChevronRight size={16} /></button>
             </div>
           </div>
         )}
@@ -4004,9 +4057,9 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="flex items-center gap-1">
-        <button onClick={onPrev} className="p-2 rounded-lg hover:bg-black/5" title="Mês anterior"><ChevronLeft size={16} /></button>
+        <button onClick={onPrev} className="p-2 rounded-lg hover:bg-black/5" style={{ color: 'var(--text-soft)' }} title="Mês anterior"><ChevronLeft size={16} /></button>
         <p className="text-sm font-medium min-w-[150px] text-center" style={{ color: 'var(--text)' }}>{label}</p>
-        <button onClick={onNext} className="p-2 rounded-lg hover:bg-black/5" title="Próximo mês"><ChevronRight size={16} /></button>
+        <button onClick={onNext} className="p-2 rounded-lg hover:bg-black/5" style={{ color: 'var(--text-soft)' }} title="Próximo mês"><ChevronRight size={16} /></button>
       </div>
       {monthOffset !== 0 && (
         <button onClick={onToday} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>hoje</button>
@@ -4017,7 +4070,7 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 
 function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [monthOffset, setMonthOffset] = useState(0);
-  const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> | 'debito'
+  const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão
   const [search, setSearch] = useState('');
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
@@ -4034,7 +4087,11 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   const month = refDate.getMonth();
   const monthLabel = refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   const viewedCycle = useMemo(() => ({ year, month, label: capitalizeFirst(monthLabel) }), [year, month, monthLabel]);
-  const visibleCards = cardFilter === 'all' || cardFilter === 'debito' ? cards : cards.filter((c) => c.id === cardFilter);
+  // Clicar numa linha de cartão seleciona só ele (e some com as outras linhas da lista); clicar
+  // de novo tira a seleção. Não faria sentido "clicar fora" pra desmarcar, então o próprio card
+  // selecionado é o único jeito de reverter.
+  const toggleCard = (cardId) => setCardFilter((cur) => (cur === cardId ? 'all' : cardId));
+  const visibleCards = cardFilter === 'all' ? cards : cards.filter((c) => c.id === cardFilter);
 
   // "Fatura" mostra só crédito, porque é a única que faz sentido marcar como paga (a compra em
   // débito já saiu da conta na hora ou é agendada, não existe "fatura" pra ela). Agrupa por
@@ -4060,7 +4117,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   // inteiro — sem botão de pagar fatura, porque débito não tem esse conceito.
   const todasTx = useMemo(() => transactions
     .filter((t) => t.type === 'despesa' && isSameMonth(t.date, year, month)
-      && (cardFilter === 'all' || (cardFilter === 'debito' ? !t.cardId : t.cardId === cardFilter))
+      && (cardFilter === 'all' || t.cardId === cardFilter)
       && (!search.trim() || t.description.toLowerCase().includes(search.trim().toLowerCase()) || t.category.toLowerCase().includes(search.trim().toLowerCase())))
     .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, search]);
 
@@ -4081,39 +4138,24 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       <div className="flex justify-center">
         <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
       </div>
-      <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
-        <div className="relative flex-1 sm:flex-none sm:w-56">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
-        </div>
-        {cards.length > 0 && (
-          <Select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
-            <option value="all">Todos os cartões</option>
-            {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
-            <option value="debito">Só débito (sem cartão)</option>
-          </Select>
-        )}
-      </div>
 
-      {cardFilter !== 'debito' && visibleCards.length > 0 && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {visibleCards.map((c, i) => (
-              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={cardGradients[i % cardGradients.length]} viewedCycle={monthOffset === 0 ? null : viewedCycle} />
-            ))}
-          </div>
-          <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>
-            {monthOffset === 0
-              ? '"Pagar fatura" sempre paga a fatura real em aberto do cartão.'
-              : 'Navegando por outro mês: os cartões acima mostram o total daquela fatura específica (sem ação de pagamento, que só existe pra fatura atual).'}
-          </p>
-          {/* Segunda cópia do navegador de mês, logo abaixo dos cartões — evita ter que rolar até
-              o topo da página pra trocar de mês quando os lançamentos ficam mais abaixo. */}
-          <div className="flex justify-center">
-            <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
-          </div>
-        </>
+      {cards.length > 0 && (
+        <div className="space-y-2">
+          {visibleCards.map((c) => (
+            <CardInvoiceRow
+              key={c.id} card={c} transactions={transactions} accounts={accounts}
+              selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
+              isCurrentMonth={monthOffset === 0} viewedCycle={monthOffset === 0 ? null : viewedCycle}
+              onPayInvoice={onPayInvoice}
+            />
+          ))}
+        </div>
       )}
+
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+      </div>
 
       <Card>
         <div className="flex flex-wrap items-center gap-1 mb-4 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
@@ -4151,6 +4193,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
               {list.map((t) => {
                 const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                const acc = !card ? accounts.find((a) => a.id === t.account) : null;
                 return (
                   <SwipeableRow
                     key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}
@@ -4160,17 +4203,15 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{t.description}</p>
-                            {t.installmentGroupId && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{t.installmentIndex}/{t.installmentCount}</span>}
-                          </div>
+                          <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{t.description}</p>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
-                          <span className="shrink-0">{formatDateShortYear(t.date)}</span>
-                          <span className="shrink-0">·</span>
-                          <span className="truncate">{card ? card.bank : 'Débito'}</span>
-                          {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
+                        <div className="flex items-center gap-1.5 mt-0.5 text-xs">
+                          <span className="truncate" style={{ color: 'var(--text-soft)' }}>
+                            {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
+                            {t.installmentGroupId && ` · (${t.installmentIndex}/${t.installmentCount})`}
+                          </span>
+                          {subview !== 'fatura' && <span className="shrink-0"><StatusBadge status={t.status} type={t.type} /></span>}
                         </div>
                         {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
                           <button onClick={() => setConfirmMarkPaid(t)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
@@ -4190,14 +4231,15 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
               {list.map((t) => {
                 const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                const acc = !card ? accounts.find((a) => a.id === t.account) : null;
                 return (
                   <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
                     <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
-                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                        {formatDate(t.date)} · {card ? card.bank : 'Débito'}
-                        {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
+                      <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>
+                        {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
+                        {t.installmentGroupId && ` · (${t.installmentIndex}/${t.installmentCount})`}
                       </p>
                     </div>
                     {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
