@@ -111,8 +111,8 @@ const GLOBAL_STYLES = `
 .shadow-soft { box-shadow: 0 1px 2px rgba(35,35,35,0.04), 0 4px 14px rgba(35,35,35,0.05); }
 .shadow-soft-lg { box-shadow: 0 2px 6px rgba(35,35,35,0.05), 0 14px 28px rgba(35,35,35,0.08); }
 
-.focus-ring:focus { outline: none; box-shadow: 0 0 0 3px rgba(93,112,82,0.22); }
-.focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(93,112,82,0.22); }
+.focus-ring:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 30%, transparent); }
+.focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 30%, transparent); }
 
 @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-up { animation: fadeSlideUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
@@ -202,6 +202,13 @@ function formatDate(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('pt-BR');
+}
+// Mesma data, mas com o ano em 2 dígitos (ex: 23/08/27) — usada nos cards mobile onde a
+// data divide espaço com a tag de parcela (3/12), pra sobrar mais respiro sem perder o ano.
+function formatDateShortYear(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 function formatDateLong(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -424,6 +431,25 @@ function computeCategoryTotals(transactions, year, month) {
   transactions.filter((t) => t.type === 'despesa' && isRealized(t) && isSameMonth(t.date, year, month)).forEach((t) => {
     totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
+  return totals;
+}
+
+// Mesma ideia, mas seguindo o período selecionado no cabeçalho do Dashboard (mês/trimestre/ano/
+// personalizado) em vez de ficar travado no mês-calendário atual — a mesma janela de tempo que
+// os KPIs do topo (Receitas do período, Despesas do período) já usam. Sem isso, ao trocar pra
+// "Trimestre" ou "Ano" o donut de categorias continuava só com o mês atual, então categorias com
+// gasto só em meses anteriores do período sumiam do gráfico.
+function computeCategoryTotalsForPeriod(transactions, period, customRange) {
+  const totals = {};
+  const add = (t) => { totals[t.category] = (totals[t.category] || 0) + t.amount; };
+  if (period === 'personalizado' && customRange.start && customRange.end) {
+    transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= customRange.start && t.date <= customRange.end).forEach(add);
+    return totals;
+  }
+  const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
+  const now = new Date();
+  const startStr = ymd(new Date(now.getFullYear(), now.getMonth() - (monthsToTake - 1), 1));
+  transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= startStr).forEach(add);
   return totals;
 }
 
@@ -2089,14 +2115,14 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                   <div className="flex items-center gap-3 p-2">
                     <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
-                        {tx.description}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
                         {tx.installmentGroupId && (
-                          <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                          <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
                             {tx.installmentIndex}/{tx.installmentCount}
                           </span>
                         )}
-                      </p>
+                      </div>
                       <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
                     </div>
                     <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
@@ -2116,14 +2142,14 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                 <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
                   <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
-                      {tx.description}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
                       {tx.installmentGroupId && (
-                        <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                        <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
                           {tx.installmentIndex}/{tx.installmentCount}
                         </span>
                       )}
-                    </p>
+                    </div>
                     <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
                   </div>
                   <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
@@ -2751,7 +2777,7 @@ function DashboardPage({ data, actions }) {
       {showChartsRow && (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {v('evolutionChart') && <div className={v('categoryDonut') ? 'lg:col-span-3' : 'lg:col-span-5'}><EvolutionChart data={data.monthlyHistory} /></div>}
-          {v('categoryDonut') && <div className={v('evolutionChart') ? 'lg:col-span-2' : 'lg:col-span-5'}><CategoryDonut data={data.categoryComparison.current} /></div>}
+          {v('categoryDonut') && <div className={v('evolutionChart') ? 'lg:col-span-2' : 'lg:col-span-5'}><CategoryDonut data={data.categoryTotalsForPeriod} subtitle="no período selecionado" /></div>}
         </div>
       )}
       {showMiddleRow && (
@@ -3428,14 +3454,14 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
-                            {tx.description}
-                            {tx.installmentGroupId && <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{tx.installmentIndex}/{tx.installmentCount}</span>}
-                          </p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
+                            {tx.installmentGroupId && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{tx.installmentIndex}/{tx.installmentCount}</span>}
+                          </div>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
-                          <span className="shrink-0">{formatDate(tx.date)}</span>
+                          <span className="shrink-0">{formatDateShortYear(tx.date)}</span>
                           <span className="shrink-0">·</span>
                           <span className="truncate">{card ? `Crédito · ${card.bank}` : `Débito · ${accName}`}</span>
                         </div>
@@ -3992,6 +4018,7 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> | 'debito'
+  const [search, setSearch] = useState('');
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
   const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
@@ -4020,16 +4047,22 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       const card = cards.find((c) => c.id === t.cardId);
       if (!card) return false;
       const cycle = getCardInvoiceCycle(card, t.date);
-      return cycle.year === year && cycle.month === month;
+      if (cycle.year !== year || cycle.month !== month) return false;
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        if (!t.description.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q)) return false;
+      }
+      return true;
     })
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, cards]);
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, cards, search]);
 
   // "Todas as despesas do mês" mistura débito e crédito de propósito, só pra visualizar o mês
   // inteiro — sem botão de pagar fatura, porque débito não tem esse conceito.
   const todasTx = useMemo(() => transactions
     .filter((t) => t.type === 'despesa' && isSameMonth(t.date, year, month)
-      && (cardFilter === 'all' || (cardFilter === 'debito' ? !t.cardId : t.cardId === cardFilter)))
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month]);
+      && (cardFilter === 'all' || (cardFilter === 'debito' ? !t.cardId : t.cardId === cardFilter))
+      && (!search.trim() || t.description.toLowerCase().includes(search.trim().toLowerCase()) || t.category.toLowerCase().includes(search.trim().toLowerCase())))
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
   const total = list.reduce((s, t) => s + t.amount, 0);
@@ -4048,15 +4081,19 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       <div className="flex justify-center">
         <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
       </div>
-      {cards.length > 0 && (
-        <div className="flex justify-center sm:justify-end">
+      <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+        <div className="relative flex-1 sm:flex-none sm:w-56">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+        </div>
+        {cards.length > 0 && (
           <Select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
             <option value="all">Todos os cartões</option>
             {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
             <option value="debito">Só débito (sem cartão)</option>
           </Select>
-        </div>
-      )}
+        )}
+      </div>
 
       {cardFilter !== 'debito' && visibleCards.length > 0 && (
         <>
@@ -4082,14 +4119,14 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         <div className="flex flex-wrap items-center gap-1 mb-4 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
           <button
             onClick={() => setSubview('fatura')}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors focus-ring"
             style={subview === 'fatura' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
           >
             Fatura (crédito)
           </button>
           <button
             onClick={() => setSubview('todas')}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors focus-ring"
             style={subview === 'todas' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
           >
             Todas as despesas do mês
@@ -4123,14 +4160,14 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
-                            {t.description}
-                            {t.installmentGroupId && <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{t.installmentIndex}/{t.installmentCount}</span>}
-                          </p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{t.description}</p>
+                            {t.installmentGroupId && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{t.installmentIndex}/{t.installmentCount}</span>}
+                          </div>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
-                          <span className="shrink-0">{formatDate(t.date)}</span>
+                          <span className="shrink-0">{formatDateShortYear(t.date)}</span>
                           <span className="shrink-0">·</span>
                           <span className="truncate">{card ? card.bank : 'Débito'}</span>
                           {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
@@ -4219,14 +4256,14 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
         <button
           onClick={() => onChangeView && onChangeView('cartoes')}
-          className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+          className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors focus-ring"
           style={view === 'cartoes' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
         >
           Meus cartões
         </button>
         <button
           onClick={() => onChangeView && onChangeView('fatura')}
-          className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+          className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors focus-ring"
           style={view === 'fatura' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
         >
           Fatura mensal
@@ -4779,7 +4816,7 @@ function VisibilitySettingsSection({ settings, onChangeSettings }) {
           <button
             key={page.key}
             onClick={() => setActiveTab(page.key)}
-            className="text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+            className="text-xs font-medium px-3 py-2 rounded-lg transition-colors focus-ring"
             style={activeTab === page.key ? { backgroundColor: 'var(--primary)', color: '#fff' } : { backgroundColor: 'var(--bg)', color: 'var(--text-soft)' }}
           >
             {page.label}
@@ -5637,6 +5674,12 @@ export default function App() {
       previous: computeCategoryTotals(transactions, prev.getFullYear(), prev.getMonth()),
     };
   }, [transactions]);
+  // Separado da comparação mês atual/anterior acima (que a aba Relatórios usa de propósito) —
+  // este segue o período selecionado no cabeçalho do Dashboard (mês/trimestre/ano/personalizado).
+  const categoryTotalsForPeriod = useMemo(
+    () => computeCategoryTotalsForPeriod(transactions, period, customRange),
+    [transactions, period, customRange]
+  );
 
   const insights = useMemo(() => {
     if (isLoading) return [];
@@ -5676,7 +5719,7 @@ export default function App() {
 
   const data = {
     transactions, accounts, cards, goals, caixinhas, recurring, benefits, investments, settings, period, customRange, cardGradients,
-    monthlyHistory: realMonthlyHistory, categoryComparison: realCategoryComparison, investmentsTotal, insights,
+    monthlyHistory: realMonthlyHistory, categoryComparison: realCategoryComparison, categoryTotalsForPeriod, investmentsTotal, insights,
   };
   const actions = {
     goTo, goToFatura, editTransaction, deleteTransaction, markTransactionPaid, addGoalFunds, deleteGoal,
