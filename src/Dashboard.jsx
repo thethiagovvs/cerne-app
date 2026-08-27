@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area,
@@ -11,7 +12,7 @@ import {
   Wallet, PiggyBank, Banknote, ArrowUpRight, ArrowDownRight, Menu, Info, Sprout,
   ShoppingBag, ShoppingCart, Home, Car, Utensils, Heart, Flower2, Film, GraduationCap,
   Plane, Laptop, Award, Briefcase, Clock, ArrowRight, FileText, Loader2, Cloud,
-  MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding,
+  MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding, Copy, Smartphone, MoreVertical,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -55,11 +56,11 @@ const GLOBAL_STYLES = `
   --primary-dark: #7A9068;
   --primary-soft: #2E3A28;
   --secondary: #8A9B7D;
-  --bg: #1C1B18;
-  --card: #26251F;
-  --border: #38362E;
-  --text: #EDEAE2;
-  --text-soft: #A6A296;
+  --bg: #0D1117;
+  --card: #161B22;
+  --border: #30363D;
+  --text: #E6EDF3;
+  --text-soft: #8B949E;
   --income: #7FB37F;
   --income-soft: #24352A;
   --expense: #D98888;
@@ -73,7 +74,7 @@ const GLOBAL_STYLES = `
 }
 .cerne-root.dark .shadow-soft,
 .cerne-root.dark .shadow-soft-lg { box-shadow: 0 1px 2px rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.3); }
-.cerne-root.dark .skeleton { background: linear-gradient(90deg, #2E2C26 25%, #38362E 37%, #2E2C26 63%); background-size: 400px 100%; }
+.cerne-root.dark .skeleton { background: linear-gradient(90deg, #161B22 25%, #21262D 37%, #161B22 63%); background-size: 400px 100%; }
 /* Os overlays de hover foram pensados pra fundo claro (escurecem levemente) — no escuro, viram
    quase invisíveis. Troca pra um overlay branco sutil só dentro do tema escuro. */
 .cerne-root.dark .hover\:bg-black\/5:hover,
@@ -125,6 +126,36 @@ const GLOBAL_STYLES = `
 @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
 .skeleton { background: linear-gradient(90deg, #EDEAE2 25%, #F7F5EF 37%, #EDEAE2 63%); background-size: 400px 100%; animation: shimmer 1.4s ease-in-out infinite; }
 
+/* Botão flutuante de novo lançamento: ao encolher/expandir (rolagem), gira uma volta
+   rápida seguida de uma segunda volta mais lenta (0%→35% cobre os primeiros 360°,
+   35%→100% cobre os últimos 360° num intervalo bem maior de tempo). Ao voltar ao
+   tamanho normal, gira só meia volta (180°), de uma vez.  */
+@keyframes fabSpinIn {
+  0%   { transform: scale(1) rotate(0deg); }
+  35%  { transform: scale(0.7) rotate(360deg); }
+  100% { transform: scale(0.5) rotate(720deg); }
+}
+@keyframes fabSpinOut {
+  0%   { transform: scale(0.5) rotate(0deg); }
+  100% { transform: scale(1) rotate(180deg); }
+}
+.fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
+.fab-spin-out { animation: fabSpinOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* Explosão sutil de emojis ao completar uma meta — burst rápido inicial, depois flutuação lenta
+   e fade out. --tx/--ty/--dur/--delay são definidos por partícula via style inline. */
+@keyframes goalCelebrateParticle {
+  0%   { transform: translate(-50%, -50%) translate(0, 0) scale(0.4); opacity: 0; }
+  15%  { transform: translate(-50%, -50%) translate(calc(var(--tx) * 0.55), calc(var(--ty) * 0.55)) scale(1.2); opacity: 1; }
+  70%  { transform: translate(-50%, -50%) translate(var(--tx), calc(var(--ty) - 36px)) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) translate(var(--tx), calc(var(--ty) - 64px)) scale(0.85); opacity: 0; }
+}
+.goal-celebrate-particle {
+  position: fixed; left: var(--origin-x); top: var(--origin-y); font-size: var(--size);
+  animation: goalCelebrateParticle var(--dur) var(--delay) cubic-bezier(0.16,0.85,0.3,1) both;
+  pointer-events: none; will-change: transform, opacity; z-index: 60;
+}
+
 @media print {
   .no-print { display: none !important; }
   .print-area { padding: 0 !important; overflow: visible !important; }
@@ -146,6 +177,7 @@ const CATEGORIES = {
   'Cuidado e Beleza': { color: '#B98DAF', soft: '#F3EBF1', icon: Flower2 },
   'Lazer': { color: '#6FA8A0', soft: '#E9F2F0', icon: Film },
   'Compras': { color: '#B9A24C', soft: '#F5F1E2', icon: ShoppingBag },
+  'Telefonia': { color: '#6B8FB0', soft: '#E9EFF4', icon: Smartphone },
   'Outros': { color: '#A8A398', soft: '#F1EFEA', icon: MoreHorizontal },
 };
 const CATEGORY_NAMES = Object.keys(CATEGORIES);
@@ -221,6 +253,82 @@ function isSameMonth(dateStr, year, month) {
   return d.getFullYear() === year && d.getMonth() === month;
 }
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+// Catálogo de blocos que o usuário pode ligar/desligar em Configurações → Personalização.
+// Cada categoria também tem um "essentialLabel" só pra exibição (o que sempre fica visível ali),
+// não é um item de fato — navegação, listas principais e formulários nunca entram nesse catálogo,
+// então não tem como desativar sem querer algo indispensável.
+const VISIBILITY_SCHEMA = [
+  {
+    key: 'dashboard', label: 'Dashboard', essentialLabel: 'Navegação principal',
+    items: [
+      { key: 'kpiSaldo', label: 'Card "Saldo disponível"' },
+      { key: 'kpiReceitas', label: 'Card "Receitas do período"' },
+      { key: 'kpiDespesas', label: 'Card "Despesas do período"' },
+      { key: 'kpiEconomia', label: 'Card "Economia acumulada"' },
+      { key: 'kpiMeta', label: 'Card "Meta mensal"' },
+      { key: 'kpiPatrimonio', label: 'Card "Patrimônio total"' },
+      { key: 'evolutionChart', label: 'Gráfico de evolução financeira' },
+      { key: 'categoryDonut', label: 'Gastos por categoria (gráfico)' },
+      { key: 'recentTransactions', label: 'Últimas transações' },
+      { key: 'monthSummary', label: 'Resumo do mês' },
+      { key: 'goalsSection', label: 'Metas financeiras' },
+      { key: 'financialCalendar', label: 'Calendário financeiro' },
+      { key: 'cardsPreview', label: 'Prévia dos cartões' },
+      { key: 'recurringPreview', label: 'Prévia de despesas recorrentes' },
+      { key: 'investmentsPreview', label: 'Prévia de investimentos' },
+      { key: 'insights', label: 'Insights automáticos' },
+    ],
+  },
+  {
+    key: 'transacoes', label: 'Transações e Receitas', essentialLabel: 'Busca, filtros, tabela e botão "Novo"',
+    items: [
+      { key: 'faturaBanner', label: 'Aviso com atalho para a Fatura mensal (em Transações)' },
+      { key: 'statCards', label: 'Cards de totais (na aba Receitas)' },
+    ],
+  },
+  {
+    key: 'contas', label: 'Contas Bancárias', essentialLabel: 'Lista de contas',
+    items: [
+      { key: 'saldoTotalCard', label: 'Card de saldo total' },
+      { key: 'caixinhas', label: 'Seção de caixinhas' },
+    ],
+  },
+  {
+    key: 'cartoes', label: 'Cartões', essentialLabel: 'Seus cartões e Fatura mensal',
+    items: [
+      { key: 'beneficios', label: 'Seção de vale-benefícios' },
+    ],
+  },
+  {
+    key: 'investimentos', label: 'Investimentos', essentialLabel: 'Lista de investimentos',
+    items: [
+      { key: 'kpiInvestido', label: 'Card "Valor investido"' },
+      { key: 'kpiAtual', label: 'Card "Valor atual"' },
+      { key: 'kpiRentabilidade', label: 'Card "Rentabilidade"' },
+      { key: 'allocationChart', label: 'Gráfico de distribuição por categoria' },
+    ],
+  },
+  {
+    key: 'recorrentes', label: 'Despesas Recorrentes', essentialLabel: 'Lista de assinaturas e despesas fixas',
+    items: [
+      { key: 'kpiTotalMensal', label: 'Card "Total recorrente mensal"' },
+      { key: 'kpiTotalAnual', label: 'Card "Total anual estimado"' },
+      { key: 'categoryChart', label: 'Gráfico por categoria' },
+    ],
+  },
+  {
+    key: 'relatorios', label: 'Relatórios', essentialLabel: 'Gráfico receitas x despesas',
+    items: [
+      { key: 'categoryComparison', label: 'Comparativo por categoria (mês atual x anterior)' },
+    ],
+  },
+];
+// Item ausente em settings.visibility conta como visível — assim dados salvos antes dessa feature
+// (ou de futuras adições ao catálogo) continuam mostrando tudo até o usuário desativar algo.
+function isVisible(settings, page, item) {
+  return settings?.visibility?.[page]?.[item] !== false;
+}
 
 /* ---------- Agregações reais (a partir dos lançamentos, contas etc.) ---------- */
 
@@ -325,6 +433,29 @@ function computeCategoryTotals(transactions, year, month) {
 // A fatura "atual" (aberta) é tudo que foi lançado no cartão desde o último pagamento até o
 // vencimento em aberto mais próximo — nunca inclui parcelas futuras de uma compra parcelada,
 // que só entram na fatura quando chegar a vez delas (ou se forem antecipadas).
+// Retorna a chave {year, month} (mês 0-indexed) do fechamento da fatura em que uma compra cai,
+// respeitando o dia de fechamento do cartão — não o mês-calendário bruto da data de compra.
+// Ex: fecha dia 22, compra em 25/jan → cai na fatura que fecha em fevereiro, não na de janeiro.
+function getCardInvoiceCycle(card, dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const closingMonth = d.getMonth() + (d.getDate() > card.closingDay ? 1 : 0);
+  const normalized = new Date(d.getFullYear(), closingMonth, 1); // JS normaliza estouro de mês/ano
+  return { year: normalized.getFullYear(), month: normalized.getMonth() };
+}
+function daysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
+// Move a data de uma parcela pra fatura anterior/seguinte (direction: -1 ou 1), respeitando o
+// fechamento do cartão — útil quando o banco atribuiu a compra a um mês diferente do que a
+// pessoa esperava (ex: compra bem perto do fechamento).
+function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
+  const cycle = getCardInvoiceCycle(card, dateStr);
+  if (direction > 0) {
+    const boundary = new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month)));
+    return ymd(addDays(boundary, 1));
+  }
+  const prevRef = new Date(cycle.year, cycle.month - 1, 1);
+  return ymd(new Date(prevRef.getFullYear(), prevRef.getMonth(), Math.min(card.closingDay, daysInMonth(prevRef.getFullYear(), prevRef.getMonth()))));
+}
+
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
   const cutoff = ymd(getNextCardDueDate(card, referenceDate));
   return transactions
@@ -343,6 +474,36 @@ function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
+}
+// Gera as ocorrências futuras (até `monthsAhead` meses a partir de hoje) de uma despesa
+// recorrente como lançamentos de verdade, marcados com recurringId (permite editar/excluir em
+// lote depois). Sempre nasce como "Pendente" — mesmo em débito — pra nunca descontar da conta
+// silenciosamente um valor que ainda não aconteceu; a pessoa confirma normalmente quando o
+// lançamento vence, do mesmo jeito que já funciona pra débito agendado. Nunca gera pra um mês
+// que já tem um lançamento com o mesmo nome (evita duplicar uma cobrança lançada manualmente
+// antes dessa função existir, ou lançada via "Lançar agora").
+function generateRecurringOccurrences(item, cards, existingTransactions, monthsAhead = 12) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const card = item.cardId ? cards.find((c) => c.id === item.cardId) : null;
+  const occurrences = [];
+  for (let i = 0; i <= monthsAhead; i++) {
+    const cursor = new Date(today.getFullYear(), today.getMonth() + i, 1);
+    const day = Math.min(item.renewalDay, daysInMonth(cursor.getFullYear(), cursor.getMonth()));
+    const occDate = new Date(cursor.getFullYear(), cursor.getMonth(), day);
+    if (i === 0 && occDate < today) continue; // já passou esse mês — não gera retroativo
+    const alreadyExists = existingTransactions.some((t) =>
+      t.type === 'despesa' && t.description === item.name && isSameMonth(t.date, cursor.getFullYear(), cursor.getMonth())
+    );
+    if (alreadyExists) continue;
+    occurrences.push({
+      id: uid(), description: item.name, amount: item.value, category: item.category, type: 'despesa',
+      account: card ? card.accountId : (item.accountId || null), cardId: card ? card.id : null,
+      paymentMethod: card ? 'Cartão de crédito' : 'Não informado',
+      date: ymd(occDate), status: 'Pendente', recurringId: item.id,
+    });
+  }
+  return occurrences;
 }
 // Algoritmo de Meeus/Jones/Butcher para o Domingo de Páscoa (base dos feriados móveis).
 function computeEaster(year) {
@@ -643,6 +804,23 @@ const COLOR_THEMES = {
   ameixa: { label: 'Ameixa', light: '#7D5A82', dark: '#B08AB8' },
 };
 
+/* ---------- Derivar tonalidades de uma cor-base (usado nos gradientes dos cartões) ---------- */
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex({ r, g, b }) {
+  return '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+}
+// Mistura hexA com hexB; t=0 devolve hexA puro, t=1 devolve hexB puro.
+function mixHex(hexA, hexB, t) {
+  const a = hexToRgb(hexA), b = hexToRgb(hexB);
+  return rgbToHex({ r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t });
+}
+
 const initialCaixinhas = [
   { id: 'cx-1', name: 'Imprevistos do dia a dia', balance: 340, accountId: 'acc-1' },
   { id: 'cx-2', name: 'Presentes e datas especiais', balance: 480, accountId: 'acc-2' },
@@ -911,9 +1089,75 @@ function IconCircle({ icon: Icon, color, soft, size = 40 }) {
   );
 }
 
+// Card com gesto de arrastar pra esquerda (swipe) que revela ações rápidas (editar/excluir) por
+// trás — usado nas listas mobile no lugar das tabelas largas, que não cabem numa tela de celular.
+// touchAction: 'pan-y' deixa o scroll vertical da página funcionando normalmente enquanto captura
+// o arrasto horizontal.
+// deleteConfirm customiza o texto do ConfirmModal ({ title, description }) exibido antes de
+// executar onDelete de verdade — arrastar e tocar em excluir nunca apaga na hora.
+function SwipeableRow({ children, onEdit, onDelete, deleteConfirm }) {
+  const ACTIONS_WIDTH = 96;
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const startXRef = useRef(0);
+  const startDragXRef = useRef(0);
+
+  function handleTouchStart(e) {
+    startXRef.current = e.touches[0].clientX;
+    startDragXRef.current = dragX;
+    setDragging(true);
+  }
+  function handleTouchMove(e) {
+    const delta = e.touches[0].clientX - startXRef.current;
+    setDragX(Math.max(-ACTIONS_WIDTH, Math.min(0, startDragXRef.current + delta)));
+  }
+  function handleTouchEnd() {
+    setDragging(false);
+    setDragX((cur) => (cur < -ACTIONS_WIDTH / 2 ? -ACTIONS_WIDTH : 0));
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      <div className="absolute inset-y-0 right-0 flex items-stretch" style={{ width: ACTIONS_WIDTH }}>
+        {onEdit && (
+          <button onClick={() => { onEdit(); setDragX(0); }} className="flex-1 flex items-center justify-center" style={{ backgroundColor: 'var(--primary)' }} title="Editar">
+            <Pencil size={18} color="#fff" />
+          </button>
+        )}
+        {onDelete && (
+          <button onClick={() => setConfirmingDelete(true)} className="flex-1 flex items-center justify-center" style={{ backgroundColor: 'var(--expense)' }} title="Excluir">
+            <Trash2 size={18} color="#fff" />
+          </button>
+        )}
+      </div>
+      <div
+        onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+        style={{ transform: `translateX(${dragX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease', backgroundColor: 'var(--card)', touchAction: 'pan-y', position: 'relative' }}
+      >
+        {children}
+      </div>
+      {confirmingDelete && (
+        <ConfirmModal
+          title={deleteConfirm?.title || 'Excluir lançamento'}
+          description={deleteConfirm?.description || 'Tem certeza que deseja excluir este item? Essa ação não pode ser desfeita.'}
+          onConfirm={() => { onDelete(); setConfirmingDelete(false); setDragX(0); }}
+          onClose={() => { setConfirmingDelete(false); setDragX(0); }}
+        />
+      )}
+    </div>
+  );
+}
+
 function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClick, type = 'button', className = '', disabled }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all focus-ring disabled:opacity-50 disabled:cursor-not-allowed';
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm' };
+  const sizes = {
+    sm: 'px-3 py-1.5 text-xs',
+    // Compacto no mobile (cabe "Importar fatura" + "Novo" + "⋮" numa linha só sem
+    // estourar pra uma 3ª linha) e no tamanho normal a partir do breakpoint sm.
+    toolbar: 'px-2.5 py-1.5 text-xs sm:px-3 sm:py-2 sm:text-sm',
+    md: 'px-4 py-2.5 text-sm', lg: 'px-5 py-3 text-sm',
+  };
   const variants = {
     primary: 'text-white hover:brightness-95 active:brightness-90 shadow-soft',
     secondary: 'border hover:bg-[var(--primary-soft)]',
@@ -926,19 +1170,157 @@ function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClic
     : {};
   return (
     <button type={type} onClick={onClick} disabled={disabled} style={style} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
-      {Icon && <Icon size={size === 'sm' ? 14 : 16} />}
+      {Icon && <Icon size={size === 'sm' || size === 'toolbar' ? 14 : 16} />}
       {children}
     </button>
   );
 }
 
-function Card({ children, className = '', padding = 'p-6' }) {
+// Substitui o <select> nativo: no mobile, um <select> normal abre a caixa de opções do
+// próprio sistema operacional (aquela lista cinza padrão, "poluída" e fora do visual do
+// app). O Select abaixo tem a MESMA API de um <select> — value, onChange, disabled, filhos
+// <option> — só que desenha o próprio menu suspenso, então em qualquer lugar do código dá
+// pra trocar a tag <select> por <Select> sem mudar mais nada.
+function flattenSelectChildren(children) {
+  const items = [];
+  React.Children.forEach(children, (child) => {
+    if (!child) return;
+    if (Array.isArray(child)) { items.push(...flattenSelectChildren(child)); return; }
+    if (child.type === 'option') { items.push({ kind: 'option', el: child }); return; }
+    if (child.type === 'optgroup') {
+      items.push({ kind: 'group', label: child.props.label });
+      items.push(...flattenSelectChildren(child.props.children));
+    }
+  });
+  return items;
+}
+
+function optionValue(opt) {
+  // Um <option> sem o atributo value usa o próprio texto como valor — mesmo comportamento
+  // do <select> nativo (usado, por exemplo, em "Conta Corrente" / "Poupança").
+  return opt.props.value !== undefined ? opt.props.value : opt.props.children;
+}
+
+// Popover genérico usado pelo <Select>, pelo menu "Filtros", pelo menu de exportar, pelo
+// seletor de período e pelas notificações: renderiza num portal (document.body) e calcula a
+// posição a partir da tela toda (não do layout do pai), então nunca fica cortado por um card/
+// modal com "overflow" no caminho. A posição — incluindo altura máxima — é sempre recalculada
+// pra caber inteiro na tela (abrindo pra cima se precisar, encostando na borda se precisar),
+// então nunca sobra conteúdo inacessível fora da viewport. Fecha ao tocar numa camada
+// invisível atrás do painel — nunca ao tocar dentro dele (mesmo arrastando pra rolar).
+function Popover({ open, onClose, triggerRef, children, width = 'trigger', align = 'left', className = '', panelStyle = {} }) {
+  const [rect, setRect] = useState(null);
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) { setRect(null); return; }
+    function update() {
+      if (!triggerRef.current) return;
+      const r = triggerRef.current.getBoundingClientRect();
+      const margin = 8;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const panelWidth = width === 'trigger' ? r.width : Math.min(width, vw - margin * 2);
+      let left;
+      if (width === 'trigger') left = r.left;
+      else if (align === 'center') left = (vw - panelWidth) / 2;
+      else if (align === 'right') left = r.right - panelWidth;
+      else left = r.left;
+      if (left + panelWidth > vw - margin) left = vw - margin - panelWidth;
+      if (left < margin) left = margin;
+      const spaceBelow = vh - r.bottom - margin;
+      const spaceAbove = r.top - margin;
+      const heightGuess = panelRef.current?.offsetHeight ?? 320;
+      const openBelow = spaceBelow >= Math.min(heightGuess, 160) || spaceBelow >= spaceAbove;
+      if (openBelow) setRect({ left, width: panelWidth, top: r.bottom + 6, maxHeight: Math.max(120, spaceBelow - 6) });
+      else setRect({ left, width: panelWidth, bottom: vh - r.top + 6, maxHeight: Math.max(120, spaceAbove - 6) });
+    }
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, triggerRef, width, align]);
+
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+  if (!open || !rect || !portalTarget) return null;
+
+  return createPortal(
+    <>
+      <div data-select-portal className="fixed inset-0 z-[99]" onClick={onClose} />
+      <div
+        ref={panelRef} data-select-portal
+        className={`fixed overflow-y-auto overscroll-contain rounded-xl shadow-soft-lg z-[100] animate-fade-up ${className}`}
+        style={{ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom, maxHeight: rect.maxHeight, backgroundColor: 'var(--card)', border: '1px solid var(--border)', WebkitOverflowScrolling: 'touch', ...panelStyle }}
+      >
+        {children}
+      </div>
+    </>,
+    portalTarget
+  );
+}
+
+function Select({ children, value, onChange, className = '', style = {}, disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
+
+  const items = flattenSelectChildren(children);
+  const selectedItem = items.find((it) => it.kind === 'option' && String(optionValue(it.el)) === String(value));
+
+  function pick(opt) {
+    if (opt.props.disabled) return;
+    onChange({ target: { value: optionValue(opt) } });
+    setOpen(false);
+  }
+
   return (
-    <div className={`rounded-2xl shadow-soft ${padding} ${className}`} style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+    <>
+      <button
+        ref={triggerRef}
+        type="button" disabled={disabled} onClick={() => setOpen((v) => !v)}
+        className={`${className} flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed`}
+        style={style}
+      >
+        <span className="truncate">{selectedItem ? selectedItem.el.props.children : ''}</span>
+        <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} style={{ color: 'var(--text-soft)' }} />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width="trigger" className="rounded-2xl py-1">
+        {items.map((it, i) => {
+          if (it.kind === 'group') {
+            return (
+              <p key={`g-${i}`} className={`px-4 text-[11px] font-semibold uppercase tracking-wide ${i > 0 ? 'mt-2 pt-2' : ''} pb-1`} style={{ color: 'var(--text-soft)', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                {it.label}
+              </p>
+            );
+          }
+          const opt = it.el;
+          const isSelected = String(optionValue(opt)) === String(value);
+          return (
+            <button
+              key={opt.key ?? i} type="button" disabled={opt.props.disabled} onClick={() => pick(opt)}
+              className="w-full text-left px-4 py-3.5 text-base flex items-center justify-between gap-3 hover:bg-[var(--primary-soft)] disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ color: 'var(--text)', borderTop: i > 0 && items[i - 1]?.kind !== 'group' ? '1px solid var(--border)' : 'none' }}
+            >
+              <span className="truncate">{opt.props.children}</span>
+              <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: isSelected ? 'var(--primary)' : 'var(--border)' }}>
+                {isSelected && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--primary)' }} />}
+              </span>
+            </button>
+          );
+        })}
+      </Popover>
+    </>
+  );
+}
+
+const Card = React.forwardRef(function Card({ children, className = '', padding = 'p-6' }, ref) {
+  return (
+    <div ref={ref} className={`rounded-2xl shadow-soft ${padding} ${className}`} style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
       {children}
     </div>
   );
-}
+});
 
 function SectionTitle({ children, subtitle, action }) {
   return (
@@ -954,9 +1336,9 @@ function SectionTitle({ children, subtitle, action }) {
 
 function EmptyState({ icon: Icon = Search, title, description }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-14 px-4">
-      <div className="rounded-2xl p-4 mb-4" style={{ backgroundColor: 'var(--primary-soft)' }}>
-        <Icon size={26} color="var(--primary)" />
+    <div className="flex flex-col items-center justify-center text-center py-8 sm:py-14 px-4">
+      <div className="rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4" style={{ backgroundColor: 'var(--primary-soft)' }}>
+        <Icon size={24} color="var(--primary)" />
       </div>
       <p className="font-medium mb-1" style={{ color: 'var(--text)' }}>{title}</p>
       {description && <p className="text-sm max-w-xs" style={{ color: 'var(--text-soft)' }}>{description}</p>}
@@ -999,7 +1381,7 @@ function Modal({ title, onClose, children, wide }) {
       >
         <div className="flex items-center justify-between px-6 py-4 sticky top-0 z-10" style={{ backgroundColor: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
           <h3 className="font-display text-base font-semibold" style={{ color: 'var(--text)' }}>{title}</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-black/5 focus-ring">
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-black/5 focus-ring">
             <X size={18} color="var(--text-soft)" />
           </button>
         </div>
@@ -1013,7 +1395,7 @@ function ConfirmModal({ title, description, onConfirm, onClose, variant = 'dange
   return (
     <Modal title={title} onClose={onClose}>
       <p className="text-sm mb-6" style={{ color: 'var(--text-soft)' }}>{description}</p>
-      <div className="flex justify-end gap-3">
+      <div className="flex flex-wrap justify-end gap-3">
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
         <Button variant={variant} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
       </div>
@@ -1041,14 +1423,81 @@ function SyncConflictModal({ date, onUseRemote, onKeepLocal }) {
 
 /* ---------- Toasts ---------- */
 
+// Botão flutuante de novo lançamento — só faz sentido em telas onde a barra lateral não fica
+// sempre visível (abaixo do breakpoint lg, ela vira uma gaveta que precisa do menu hambúrguer
+// pra abrir). Fica rente à base da tela, no mesmo nível da faixa dos toasts.
+// Enquanto o usuário rola a tela ele encolhe pela metade, e volta ao tamanho normal depois
+// de 0,75s sem nenhum scroll (ver handleContentScroll no App).
+function FAB({ onClick, shrink }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`fixed z-20 w-14 h-14 rounded-2xl flex items-center justify-center shadow-soft-lg no-print lg:hidden active:scale-95 ${shrink ? 'fab-spin-in' : 'fab-spin-out'}`}
+      style={{ right: '1.25rem', bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))', backgroundColor: 'var(--primary)' }}
+      title="Novo lançamento"
+    >
+      <Plus size={26} color="#fff" />
+    </button>
+  );
+}
+
 function ToastContainer({ toasts }) {
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2 no-print">
+    <div className="fixed left-4 right-4 sm:left-auto sm:right-6 z-[60] flex flex-col items-stretch sm:items-end gap-2 no-print" style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
       {toasts.map((t) => (
-        <div key={t.id} className="animate-toast flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-soft-lg text-sm font-medium" style={{ backgroundColor: t.type === 'error' ? 'var(--expense)' : 'var(--primary-dark)', color: '#fff' }}>
-          {t.type === 'error' ? <AlertCircle size={16} /> : <Check size={16} />}
-          {t.message}
+        <div key={t.id} className="animate-toast flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-soft-lg text-sm font-medium sm:max-w-sm" style={{ backgroundColor: t.type === 'error' ? 'var(--expense)' : 'var(--primary-dark)', color: '#fff' }}>
+          {t.type === 'error' ? <AlertCircle size={16} className="shrink-0" /> : <Check size={16} className="shrink-0" />}
+          <span className="min-w-0">{t.message}</span>
         </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Comemoração sutil ao completar uma meta (sem popup — só os emojis) ---------- */
+
+const CELEBRATION_EMOJIS = ['🥳', '🎉', '🎊'];
+const CELEBRATION_PARTICLE_COUNT = 20;
+const CELEBRATION_DURATION_MS = 3800; // cobre com folga o pior caso de dur+delay das partículas (até ~3.7s)
+
+function GoalCelebration({ origin, onDone }) {
+  // Gera as partículas uma única vez (na montagem), não a cada render — senão a animação reinicia sozinha.
+  const particles = useMemo(() => {
+    return Array.from({ length: CELEBRATION_PARTICLE_COUNT }, (_, i) => {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 70 + Math.random() * 170;
+      return {
+        id: i,
+        emoji: CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)],
+        tx: Math.cos(angle) * distance,
+        ty: Math.sin(angle) * distance,
+        size: 18 + Math.random() * 16,
+        dur: 2.4 + Math.random() * 1.1,
+        delay: Math.random() * 0.2,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(onDone, CELEBRATION_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [onDone]);
+
+  // Sem posição de origem capturada (ex: card fora da tela) — cai num ponto central razoável,
+  // pra comemoração nunca quebrar, só ficar um pouco menos "conectada" ao card.
+  const x = origin?.x ?? (typeof window !== 'undefined' ? window.innerWidth / 2 : 200);
+  const y = origin?.y ?? (typeof window !== 'undefined' ? window.innerHeight / 2.5 : 200);
+
+  return (
+    <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 60 }} aria-hidden="true">
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="goal-celebrate-particle"
+          style={{ '--origin-x': `${x}px`, '--origin-y': `${y}px`, '--tx': `${p.tx}px`, '--ty': `${p.ty}px`, '--size': `${p.size}px`, '--dur': `${p.dur}s`, '--delay': `${p.delay}s` }}
+        >
+          {p.emoji}
+        </span>
       ))}
     </div>
   );
@@ -1070,7 +1519,7 @@ function CurrencyInput({ value, onChange, placeholder = '0,00' }) {
       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-soft)' }}>R$</span>
       <input
         value={display} onChange={handleChange} placeholder={placeholder} inputMode="numeric"
-        className="w-full pl-9 pr-3.5 py-2.5 rounded-xl text-sm focus-ring tabular-nums"
+        className="w-full pl-9 pr-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring tabular-nums"
         style={{ border: '1px solid var(--border)', color: 'var(--text)', backgroundColor: 'var(--card)' }}
       />
     </div>
@@ -1085,7 +1534,36 @@ function FieldLabel({ children, error }) {
   );
 }
 
-const inputClass = 'w-full px-3.5 py-2.5 rounded-xl text-sm focus-ring';
+// Pra saldo de conta (diferente de valor de lançamento, que é sempre positivo — o sinal vem do
+// tipo receita/despesa): aqui o próprio valor pode ser negativo (conta no cheque especial, cartão
+// de débito estourado etc). Um teclado numérico de celular não tem tecla de "-", então em vez de
+// pedir pra digitar o sinal, um botão alterna entre positivo/negativo e o campo edita só a
+// magnitude — funciona igual em qualquer teclado.
+function SignedCurrencyInput({ value, onChange, placeholder }) {
+  const isNegative = value < 0;
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onChange(-value)}
+        title={isNegative ? 'Tornar positivo' : 'Tornar negativo (conta no vermelho)'}
+        className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center font-display font-bold text-lg focus-ring transition-colors"
+        style={{
+          backgroundColor: isNegative ? 'var(--expense-soft)' : 'var(--bg)',
+          color: isNegative ? 'var(--expense)' : 'var(--text-soft)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        {isNegative ? '−' : '+'}
+      </button>
+      <div className="flex-1">
+        <CurrencyInput value={Math.abs(value)} onChange={(v) => onChange(isNegative ? -v : v)} placeholder={placeholder} />
+      </div>
+    </div>
+  );
+}
+
+const inputClass = 'w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring';
 const inputStyle = { border: '1px solid var(--border)', color: 'var(--text)', backgroundColor: 'var(--card)' };
 
 /* ============================================================
@@ -1094,10 +1572,10 @@ const inputStyle = { border: '1px solid var(--border)', color: 'var(--text)', ba
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'transacoes', label: 'Transações', icon: ArrowLeftRight },
-  { id: 'receitas', label: 'Receitas', icon: TrendingUp },
   { id: 'contas', label: 'Contas Bancárias', icon: Landmark },
   { id: 'cartoes', label: 'Cartões', icon: CreditCard },
+  { id: 'transacoes', label: 'Transações', icon: ArrowLeftRight },
+  { id: 'receitas', label: 'Receitas', icon: TrendingUp },
   { id: 'investimentos', label: 'Investimentos', icon: PieChartIcon },
   { id: 'metas', label: 'Metas', icon: Target },
   { id: 'recorrentes', label: 'Despesas Recorrentes', icon: RefreshCw },
@@ -1123,7 +1601,7 @@ function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNew
             <p className="font-display text-lg font-bold leading-none" style={{ color: 'var(--text)' }}>Cerne</p>
             <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-soft)' }}>Gestão financeira</p>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="ml-auto lg:hidden p-1.5 rounded-lg hover:bg-black/5">
+          <button onClick={() => setSidebarOpen(false)} className="ml-auto lg:hidden p-1.5 rounded-lg hover:bg-black/5" title="Fechar menu">
             <X size={18} />
           </button>
         </div>
@@ -1172,43 +1650,72 @@ function Sidebar({ activePage, setActivePage, sidebarOpen, setSidebarOpen, onNew
   );
 }
 
+// Fecha um dropdown/painel ao clicar fora dele — usado no filtro de período e no sino de
+// notificações, que hoje só fecham se o usuário clicar de novo no botão que abriu.
+function useClickOutside(ref, onOutside, active) {
+  useEffect(() => {
+    if (!active) return;
+    function handle(e) {
+      if (!ref.current || ref.current.contains(e.target)) return;
+      // O menu do <Select> é renderizado num portal (fora dessa árvore de elementos), então
+      // tocar numa opção dele conta como "fora" pra esse ref — sem essa checagem, selecionar
+      // algo dentro de um <Select> aninhado (ex: no popover de Filtros) fechava o popover
+      // inteiro antes do clique ser processado.
+      if (e.target.closest?.('[data-select-portal]')) return;
+      onOutside();
+    }
+    document.addEventListener('mousedown', handle);
+    document.addEventListener('touchstart', handle);
+    return () => {
+      document.removeEventListener('mousedown', handle);
+      document.removeEventListener('touchstart', handle);
+    };
+  }, [ref, onOutside, active]);
+}
+
 function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
   const labels = { mes: 'Este mês', trimestre: 'Trimestre', ano: 'Ano', personalizado: 'Personalizado' };
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium focus-ring" style={{ border: '1px solid var(--border)', color: 'var(--text)' }}>
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)} title={labels[period]}
+        className="flex items-center gap-2 h-11 box-border px-3 sm:px-3.5 rounded-xl text-sm font-medium focus-ring"
+        style={{ border: '1px solid var(--border)', color: 'var(--text)' }}
+      >
         <CalendarIcon size={15} color="var(--text-soft)" />
-        {labels[period]}
-        <ChevronDown size={14} color="var(--text-soft)" />
+        <span className="hidden sm:inline">{labels[period]}</span>
+        <ChevronDown size={14} color="var(--text-soft)" className="hidden sm:inline" />
       </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-64 rounded-xl shadow-soft-lg p-2 z-20" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-          {Object.entries(labels).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => { setPeriod(key); if (key !== 'personalizado') setOpen(false); }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-[var(--primary-soft)]"
-              style={{ color: period === key ? 'var(--primary-dark)' : 'var(--text)', fontWeight: period === key ? 600 : 400 }}
-            >
-              {label}
-            </button>
-          ))}
-          {period === 'personalizado' && (
-            <div className="p-2 space-y-2 border-t mt-1" style={{ borderColor: 'var(--border)' }}>
-              <input type="date" value={customRange.start} onChange={(e) => setCustomRange((r) => ({ ...r, start: e.target.value }))} className={inputClass} style={inputStyle} />
-              <input type="date" value={customRange.end} onChange={(e) => setCustomRange((r) => ({ ...r, end: e.target.value }))} className={inputClass} style={inputStyle} />
-              <Button size="sm" className="w-full" onClick={() => setOpen(false)}>Aplicar</Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} width={256} align="center" className="p-2">
+        {Object.entries(labels).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => { setPeriod(key); if (key !== 'personalizado') setOpen(false); }}
+            className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-[var(--primary-soft)]"
+            style={{ color: period === key ? 'var(--primary-dark)' : 'var(--text)', fontWeight: period === key ? 600 : 400 }}
+          >
+            {label}
+          </button>
+        ))}
+        {period === 'personalizado' && (
+          <div className="p-2 space-y-2 border-t mt-1" style={{ borderColor: 'var(--border)' }}>
+            <input type="date" value={customRange.start} onChange={(e) => setCustomRange((r) => ({ ...r, start: e.target.value }))} className={inputClass} style={inputStyle} />
+            <input type="date" value={customRange.end} onChange={(e) => setCustomRange((r) => ({ ...r, end: e.target.value }))} className={inputClass} style={inputStyle} />
+            <Button size="sm" className="w-full" onClick={() => setOpen(false)}>Aplicar</Button>
+          </div>
+        )}
+      </Popover>
+    </>
   );
 }
 
 function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen, insights }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [dismissed, setDismissed] = useState(() => {
     try { return new Set(JSON.parse(window.localStorage.getItem('cerne-dismissed-notifications-v1')) || []); } catch { return new Set(); }
   });
@@ -1220,53 +1727,105 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
   }
   const today = capitalizeFirst(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
   return (
-    <header className="sticky top-0 z-30 flex items-center gap-3 px-4 md:px-6 lg:px-8 py-4 no-print" style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
-      <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-xl hover:bg-black/5">
-        <Menu size={20} color="var(--text)" />
-      </button>
-      <div className="hidden md:block min-w-0">
-        <p className="font-display text-base font-semibold truncate" style={{ color: 'var(--text)' }}>{getGreeting()}!</p>
-        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{today}</p>
-      </div>
-      <div className="flex-1 flex justify-center px-2">
-        <div className="relative w-full max-w-sm">
+    <header className="sticky top-0 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-6 lg:px-8 py-3 sm:py-4 no-print" style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
+      {!searchExpanded && (
+        <button onClick={() => setSidebarOpen(true)} className="lg:hidden h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 shrink-0" title="Abrir menu">
+          <Menu size={20} color="var(--text)" />
+        </button>
+      )}
+      {!searchExpanded && (
+        <div className="hidden md:block min-w-0">
+          <p className="font-display text-base font-semibold truncate" style={{ color: 'var(--text)' }}>{getGreeting()}!</p>
+          <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{today}</p>
+        </div>
+      )}
+
+      {/* No mobile, a busca some por padrão (não cabia sem cortar o texto do placeholder) e vira
+          só um ícone — ao tocar, expande e toma o espaço dos outros ícones do cabeçalho
+          temporariamente. Em telas ≥ sm ela sempre aparece inteira, como antes. */}
+      <div className="hidden sm:flex flex-1 min-w-0 justify-center px-1 sm:px-2">
+        <div className="relative w-full max-w-sm min-w-0">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input
-            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos, contas, cartões..."
-            className="w-full pl-9 pr-3 py-2 rounded-xl text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
+            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
+            className="w-full pl-9 pr-9 py-2 rounded-xl text-base sm:text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
           />
+          {search && (
+            <button
+              onClick={() => setSearch('')} title="Limpar busca"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-black/10"
+            >
+              <Trash2 size={14} color="var(--text-soft)" />
+            </button>
+          )}
         </div>
       </div>
-      <div className="shrink-0">
+      {/* Este wrapper fica sempre flex-1 (recolhido ou expandido) pra empurrar o filtro
+          mensal e o sino de notificações pro canto direito do cabeçalho — antes, no estado
+          recolhido, ele encolhia junto com o ícone e os outros ícones ficavam todos
+          amontoados à esquerda. */}
+      <div className="sm:hidden flex-1 min-w-0">
+        {searchExpanded ? (
+          <div className="relative w-full">
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+            <input
+              autoFocus
+              value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
+              className="w-full h-11 box-border pl-9 pr-9 text-base focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
+            />
+            <button
+              onClick={() => { setSearch(''); setSearchExpanded(false); }} title="Fechar busca"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-black/10"
+            >
+              <X size={14} color="var(--text-soft)" />
+            </button>
+          </div>
+        ) : (
+          // Estado de repouso: agora mostra a lupa e o texto "Buscar lançamentos" por
+          // inteiro, como uma caixa de busca de verdade (não só o ícone) — o toque abre o
+          // input de fato editável logo abaixo. Fonte um pouco menor (text-xs) pra caber
+          // sem cortar o texto nessa largura reduzida, dividida com os outros ícones do
+          // cabeçalho.
+          <button
+            onClick={() => setSearchExpanded(true)}
+            className="flex items-center gap-2 w-full h-11 box-border pl-3.5 pr-3 rounded-xl focus-ring"
+            style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)' }}
+            title="Buscar"
+          >
+            <Search size={15} className="shrink-0" color="var(--text-soft)" />
+            <span className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>Buscar lançamentos</span>
+          </button>
+        )}
+      </div>
+
+      <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
         <PeriodSelector period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} />
       </div>
-      <div className="relative">
-        <button onClick={() => setNotifOpen(!notifOpen)} className="relative p-2.5 rounded-xl hover:bg-black/5 focus-ring">
+      <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
+        <button ref={notifRef} onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
           <Bell size={18} color="var(--text-soft)" />
           {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
         </button>
-        {notifOpen && (
-          <div className="absolute right-0 mt-2 w-72 rounded-xl shadow-soft-lg p-2 z-20 max-h-80 overflow-y-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-            {visibleInsights.length === 0 ? (
-              <div className="px-3 py-4 text-center">
-                <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
-              </div>
-            ) : (
-              visibleInsights.map((n, i) => {
-                const Icon = n.icon || Info;
-                return (
-                  <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
-                    <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
-                    <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
-                    <button onClick={() => dismissNotification(n.text)} className="p-1 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
-                      <X size={13} color="var(--text-soft)" />
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="center" className="p-2">
+          {visibleInsights.length === 0 ? (
+            <div className="px-3 py-4 text-center">
+              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
+            </div>
+          ) : (
+            visibleInsights.map((n, i) => {
+              const Icon = n.icon || Info;
+              return (
+                <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
+                  <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
+                  <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
+                  <button onClick={() => dismissNotification(n.text)} className="p-2 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
+                    <X size={13} color="var(--text-soft)" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </Popover>
       </div>
     </header>
   );
@@ -1276,11 +1835,11 @@ function Banner({ insight, onDismiss }) {
   if (!insight) return null;
   const Icon = insight.icon;
   return (
-    <div className="mx-4 md:mx-6 lg:mx-8 mt-4 mb-2 no-print">
-      <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ backgroundColor: 'var(--primary-soft)' }}>
+    <div className="mx-4 md:mx-6 lg:mx-8 mt-3 sm:mt-4 mb-2 no-print">
+      <div className="flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-xl" style={{ backgroundColor: 'var(--primary-soft)' }}>
         <Icon size={16} color="var(--primary-dark)" className="shrink-0" />
-        <p className="text-sm flex-1" style={{ color: 'var(--primary-dark)' }}>{insight.text}</p>
-        <button onClick={onDismiss} className="p-1 rounded-lg hover:bg-black/5 shrink-0"><X size={14} color="var(--primary-dark)" /></button>
+        <p className="text-xs sm:text-sm flex-1 min-w-0" style={{ color: 'var(--primary-dark)' }}>{insight.text}</p>
+        <button onClick={onDismiss} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Dispensar"><X size={14} color="var(--primary-dark)" /></button>
       </div>
     </div>
   );
@@ -1323,7 +1882,8 @@ function thisMonthSaved(mh) {
   return m.receitas - m.despesas;
 }
 
-function StatCard({ title, value, description, icon: Icon, color, soft, growth, progressPercent }) {
+function StatCard({ title, value, description, icon: Icon, color, soft, growth, progressPercent, expandableLabel, expandableContent, masked, onToggleMask }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <Card padding="p-5" className="animate-fade-up">
       <div className="flex items-center justify-between mb-3 gap-2">
@@ -1338,28 +1898,56 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
           </span>
         )}
       </div>
-      <p className="font-display text-2xl font-bold tabular-nums mb-1" style={{ color: 'var(--text)' }}>{value}</p>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <p className="font-display text-2xl font-bold tabular-nums truncate" style={{ color: 'var(--text)' }}>{masked ? '••••••' : value}</p>
+        {onToggleMask && (
+          <button onClick={onToggleMask} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0" title={masked ? 'Mostrar saldo' : 'Ocultar saldo'}>
+            {masked ? <EyeOff size={15} color="var(--text-soft)" /> : <Eye size={15} color="var(--text-soft)" />}
+          </button>
+        )}
+      </div>
       {progressPercent != null && (
         <div className="my-2"><ProgressBar percent={progressPercent} color={color} /></div>
       )}
       {description && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>{description}</p>}
+      {expandableContent && (
+        <>
+          <button onClick={() => setExpanded((e) => !e)} className="text-xs font-medium mt-2 flex items-center gap-1" style={{ color }}>
+            {expanded ? 'Ocultar' : (expandableLabel || 'Ver detalhes')} {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          {expanded && <div className="mt-2 pt-2 space-y-1.5" style={{ borderTop: '1px solid var(--border)' }}>{expandableContent}</div>}
+        </>
+      )}
     </Card>
   );
 }
 
-function KPIRow({ kpis }) {
+function KPIRow({ kpis, settings, accounts }) {
+  const [hideBalance, setHideBalance] = useState(false);
   const metaPercent = kpis.metaMensal.percent;
-  const cards = [
-    { title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)' },
-    { title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
-    { title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
-    { title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
-    { title: 'Meta mensal', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
-    { title: 'Patrimônio total', value: formatBRL(kpis.patrimonio), description: 'Contas + investimentos', icon: Landmark, color: 'var(--invest)', soft: 'var(--invest-soft)', growth: kpis.growth.patrimonio },
+  const saldoBreakdown = accounts && accounts.length > 0 && (
+    <>
+      {accounts.map((a) => (
+        <div key={a.id} className="flex items-center justify-between gap-2 text-xs">
+          <span className="truncate" style={{ color: 'var(--text-soft)' }}>{a.bank}</span>
+          <span className="tabular-nums font-medium shrink-0" style={{ color: a.balance < 0 ? 'var(--expense)' : 'var(--text)' }}>{hideBalance ? '••••••' : formatBRL(a.balance)}</span>
+        </div>
+      ))}
+    </>
+  );
+  const allCards = [
+    { key: 'kpiSaldo', title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)', expandableLabel: 'Ver saldo por conta', expandableContent: saldoBreakdown, masked: hideBalance, onToggleMask: () => setHideBalance((v) => !v) },
+    { key: 'kpiReceitas', title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
+    { key: 'kpiDespesas', title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
+    { key: 'kpiEconomia', title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
+    { key: 'kpiMeta', title: 'Meta mensal', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
+    { key: 'kpiPatrimonio', title: 'Patrimônio total', value: formatBRL(kpis.patrimonio), description: 'Contas + investimentos', icon: Landmark, color: 'var(--invest)', soft: 'var(--invest-soft)', growth: kpis.growth.patrimonio },
   ];
+  const cards = allCards.filter((c) => isVisible(settings, 'dashboard', c.key));
+  if (cards.length === 0) return null;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {cards.map((c, i) => <StatCard key={i} {...c} />)}
+      {cards.map((c) => <StatCard key={c.key} {...c} />)}
     </div>
   );
 }
@@ -1436,7 +2024,6 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
             <PieChart>
               <Pie
                 data={chartData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2} animationDuration={700}
-                onMouseEnter={(_, i) => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
                 onClick={(_, i) => setActiveIndex((cur) => (cur === i ? null : i))}
               >
                 {chartData.map((entry, i) => (
@@ -1456,7 +2043,6 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
           {chartData.map((entry, i) => (
             <div
               key={i}
-              onMouseEnter={() => setActiveIndex(i)} onMouseLeave={() => setActiveIndex(null)}
               onClick={() => setActiveIndex((cur) => (cur === i ? null : i))}
               className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer transition-colors"
               style={{ backgroundColor: activeIndex === i ? entry.color + '26' : 'transparent' }}
@@ -1476,7 +2062,12 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
 /* ---------- Transações recentes (resumo no dashboard) ---------- */
 
 function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll }) {
-  const recent = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+  // Só o que já aconteceu (ou vence hoje) — sem isso, as ocorrências futuras geradas
+  // automaticamente pelas despesas recorrentes (até 12 meses à frente) dominariam a lista,
+  // já que ela ordena por data mais recente primeiro.
+  const todayStr = ymd(new Date());
+  const recent = transactions.filter((t) => t.date <= todayStr).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7);
+  const [confirmDeleteTx, setConfirmDeleteTx] = useState(null);
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
@@ -1485,34 +2076,76 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
       {recent.length === 0 ? (
         <EmptyState icon={ArrowLeftRight} title="Nenhum lançamento ainda" description="Seus lançamentos mais recentes aparecem aqui." />
       ) : (
-        <div className="space-y-1">
-          {recent.map((tx) => {
-            const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
-            return (
-              <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
-                <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
-                    {tx.description}
-                    {tx.installmentGroupId && (
-                      <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                        {tx.installmentIndex}/{tx.installmentCount}
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+        <>
+          {/* Mobile: swipe pra esquerda revela editar/excluir, como nas outras listas de lançamentos. */}
+          <div className="sm:hidden space-y-2">
+            {recent.map((tx) => {
+              const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              return (
+                <SwipeableRow
+                  key={tx.id} onEdit={() => onEdit(tx)} onDelete={() => setConfirmDeleteTx(tx)}
+                  deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
+                >
+                  <div className="flex items-center gap-3 p-2">
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
+                        {tx.description}
+                        {tx.installmentGroupId && (
+                          <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                            {tx.installmentIndex}/{tx.installmentCount}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                    </div>
+                    <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
+                      {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
+                    </span>
+                  </div>
+                </SwipeableRow>
+              );
+            })}
+          </div>
+
+          {/* Desktop/tablet: linha única com ícones de ação, como antes. */}
+          <div className="hidden sm:block space-y-1">
+            {recent.map((tx) => {
+              const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              return (
+                <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
+                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm truncate" style={{ color: 'var(--text)' }}>
+                      {tx.description}
+                      {tx.installmentGroupId && (
+                        <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                          {tx.installmentIndex}/{tx.installmentCount}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                  </div>
+                  <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
+                    {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
+                    <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
+                  </div>
                 </div>
-                <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
-                  {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
-                </span>
-                <div className="hidden sm:flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => onEdit(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Pencil size={13} color="var(--text-soft)" /></button>
-                  <button onClick={() => onDelete(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--expense)" /></button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {confirmDeleteTx && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteTx.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteTx); setConfirmDeleteTx(null); }}
+          onClose={() => setConfirmDeleteTx(null)}
+        />
       )}
     </Card>
   );
@@ -1562,35 +2195,49 @@ function MonthSummaryPanel({ transactions, kpis }) {
 
 /* ---------- Metas (preview + cards) ---------- */
 
-function GoalCard({ goal, onAddFunds, onDelete, compact }) {
+function GoalCard({ goal, onAddFunds, onDelete, onCompleted, compact }) {
   const Icon = GOAL_ICONS[goal.icon] || Target;
   const percent = Math.min(100, (goal.current / goal.target) * 100);
   const [adding, setAdding] = useState(false);
   const [amount, setAmount] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const cardRef = useRef(null);
   const deadlineLabel = new Date(goal.deadline + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
   const estimate = useMemo(() => estimateGoalCompletion(goal), [goal.current, goal.target, goal.history]);
   const history = goal.history || [];
+  function confirmAddFunds() {
+    if (amount > 0) {
+      const wasComplete = goal.current >= goal.target;
+      const willBeComplete = goal.current + amount >= goal.target;
+      onAddFunds(goal, amount);
+      // Comemora só na transição pra concluída — não a cada aporte numa meta que já bateu 100%.
+      if (!wasComplete && willBeComplete && onCompleted) {
+        const rect = cardRef.current?.getBoundingClientRect();
+        onCompleted(rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null);
+      }
+    }
+    setAdding(false); setAmount(0);
+  }
   return (
-    <Card className="animate-fade-up" padding="p-5">
+    <Card ref={cardRef} className="animate-fade-up" padding="p-5">
       <div className="flex items-start gap-3 mb-4">
-        <IconCircle icon={Icon} color="var(--goals)" soft="var(--goals-soft)" />
+        <IconCircle icon={Icon} color="var(--primary)" soft="var(--primary-soft)" />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate" style={{ color: 'var(--text)' }}>{goal.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Previsão: {deadlineLabel}</p>
         </div>
         {!compact && (
-          <button onClick={() => setConfirmDelete(true)} className="p-1 rounded-lg hover:bg-black/5 shrink-0"><Trash2 size={14} color="var(--text-soft)" /></button>
+          <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
         )}
       </div>
       <div className="flex items-end justify-between mb-2">
         <span className="font-display text-xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(goal.current)}</span>
         <span className="text-xs tabular-nums" style={{ color: 'var(--text-soft)' }}>de {formatBRL(goal.target)}</span>
       </div>
-      <ProgressBar percent={percent} color="var(--goals)" />
+      <ProgressBar percent={percent} color="var(--primary)" />
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs font-semibold" style={{ color: 'var(--goals)' }}>{percent.toFixed(0)}% concluído</span>
+        <span className="text-xs font-semibold" style={{ color: 'var(--primary-dark)' }}>{percent.toFixed(0)}% concluído</span>
         {!compact && !adding && (
           <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>
             <Plus size={12} /> Adicionar valor
@@ -1600,15 +2247,15 @@ function GoalCard({ goal, onAddFunds, onDelete, compact }) {
       {adding && (
         <div className="flex items-center gap-2 mt-3">
           <CurrencyInput value={amount} onChange={setAmount} />
-          <Button size="sm" onClick={() => { if (amount > 0) { onAddFunds(goal, amount); } setAdding(false); setAmount(0); }}>OK</Button>
-          <button onClick={() => { setAdding(false); setAmount(0); }} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+          <Button size="sm" onClick={confirmAddFunds}>OK</Button>
+          <button onClick={() => { setAdding(false); setAmount(0); }} className="p-2" title="Cancelar"><X size={14} color="var(--text-soft)" /></button>
         </div>
       )}
       {!compact && (
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
           {estimate.status === 'ok' && (
             <p className="text-xs flex items-start gap-1.5" style={{ color: 'var(--text-soft)' }}>
-              <TrendingUp size={13} className="mt-0.5 shrink-0" color="var(--goals)" />
+              <TrendingUp size={13} className="mt-0.5 shrink-0" color="var(--primary)" />
               <span>No ritmo atual (~{formatBRL(estimate.avgMonthly)}/mês), a meta deve ser concluída em <strong style={{ color: 'var(--text)' }}>{estimate.etaLabel}</strong>.</span>
             </p>
           )}
@@ -1628,7 +2275,7 @@ function GoalCard({ goal, onAddFunds, onDelete, compact }) {
                   {[...history].reverse().map((h, i) => (
                     <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
                       <span style={{ color: 'var(--text-soft)' }}>{formatDate(h.date)}</span>
-                      <span className="tabular-nums font-medium" style={{ color: 'var(--goals)' }}>+{formatBRL(h.amount)}</span>
+                      <span className="tabular-nums font-medium" style={{ color: 'var(--primary-dark)' }}>+{formatBRL(h.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -1668,7 +2315,7 @@ function GoalForm({ onSave, onClose }) {
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Viagem para a praia" />
           {errors.name && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.name}</p>}
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel error={errors.target}>Valor objetivo</FieldLabel>
             <CurrencyInput value={form.target} onChange={(v) => setForm({ ...form, target: v })} />
@@ -1703,14 +2350,14 @@ function GoalForm({ onSave, onClose }) {
   );
 }
 
-function GoalsSection({ goals, onAddFunds, onDelete, onSeeAll, compact }) {
+function GoalsSection({ goals, onAddFunds, onDelete, onCompleted, onSeeAll, compact }) {
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={onSeeAll && <button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
         Metas financeiras
       </SectionTitle>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onDelete={onDelete} compact={compact} />)}
+        {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onDelete={onDelete} onCompleted={onCompleted} compact={compact} />)}
       </div>
     </Card>
   );
@@ -1753,19 +2400,21 @@ function FinancialCalendar({ cards, transactions }) {
     if (!current || typePriority[e.type] > typePriority[current]) dayDominantType[e.day] = e.type;
   });
 
+  const now = new Date();
+  const monthOffset = (year - now.getFullYear()) * 12 + (month - now.getMonth());
+
   return (
     <Card className="animate-fade-up">
-      <SectionTitle
-        action={
-          <div className="flex items-center gap-1">
-            <button onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-1.5 rounded-lg hover:bg-black/5"><ChevronLeft size={16} /></button>
-            <span className="text-xs font-medium w-24 text-center" style={{ color: 'var(--text-soft)' }}>{capitalizeFirst(viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</span>
-            <button onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-1.5 rounded-lg hover:bg-black/5"><ChevronRight size={16} /></button>
-          </div>
-        }
-      >
-        Calendário financeiro
-      </SectionTitle>
+      <SectionTitle>Calendário financeiro</SectionTitle>
+      <div className="flex justify-center mb-3">
+        <MonthNavigator
+          label={capitalizeFirst(viewDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}
+          monthOffset={monthOffset}
+          onPrev={() => setViewDate(new Date(year, month - 1, 1))}
+          onNext={() => setViewDate(new Date(year, month + 1, 1))}
+          onToday={() => setViewDate(new Date(now.getFullYear(), now.getMonth(), 1))}
+        />
+      </div>
       <div className="grid grid-cols-7 gap-1 mb-3">
         {weekDays.map((d, i) => <div key={i} className="text-center text-[11px] font-medium py-1" style={{ color: 'var(--text-soft)' }}>{d}</div>)}
         {cells.map((c) => (
@@ -1813,10 +2462,10 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
         </div>
         <div>
           <FieldLabel>Debitar de qual conta?</FieldLabel>
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-sm focus-ring" style={inputStyle}>
+          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
             <option value="">Nenhuma (só marcar como paga)</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          </Select>
           <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
             {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
           </p>
@@ -1830,8 +2479,26 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
   );
 }
 
-function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments }) {
-  const invoice = useMemo(() => computeCardInvoice(card, transactions), [card, transactions]);
+function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onEdit, onDelete, viewedCycle }) {
+  // viewedCycle: opcional { year, month, label } — quando presente (navegação por mês na aba
+  // Fatura), mostra o total da fatura daquele ciclo específico, não necessariamente a fatura
+  // real em aberto agora. Nesse modo a visualização fica mais enxuta: pagar fatura, antecipar
+  // parcelas e vencimento/limite são conceitos do "agora", não fazem sentido pra um mês
+  // navegado (passado ou futuro), então ficam ocultos.
+  const isHistoricalView = !!viewedCycle;
+  const invoice = useMemo(() => {
+    if (isHistoricalView) {
+      return transactions
+        .filter((t) => t.type === 'despesa' && t.cardId === card.id)
+        .filter((t) => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })
+        .reduce((s, t) => s + t.amount, 0);
+    }
+    return computeCardInvoice(card, transactions);
+  }, [card, transactions, isHistoricalView, viewedCycle?.year, viewedCycle?.month]);
+  const invoiceCount = useMemo(() => {
+    if (!isHistoricalView) return 0;
+    return transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })()).length;
+  }, [card, transactions, isHistoricalView, viewedCycle?.year, viewedCycle?.month]);
   const percentUsed = card.limit > 0 ? (invoice / card.limit) * 100 : 0;
   const barColor = percentUsed > 85 ? 'var(--expense)' : percentUsed > 65 ? 'var(--alert)' : 'var(--income)';
   const nextDue = useMemo(() => getNextCardDueDate(card), [card.dueDay]);
@@ -1839,11 +2506,13 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   const nextDueLabel = nextDue.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
   const [showPayModal, setShowPayModal] = useState(false);
   const [confirmAdvance, setConfirmAdvance] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
   const futureInstallments = useMemo(() => {
     const cutoff = ymd(nextDue);
     return transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
   }, [card.id, transactions, nextDue]);
   const futureTotal = futureInstallments.reduce((s, t) => s + t.amount, 0);
+  const pendingInvoiceCount = useMemo(() => transactions.filter((t) => t.cardId === card.id && t.status === 'Pendente').length, [transactions, card.id]);
   return (
     <div className="rounded-2xl p-5 text-white shadow-soft-lg" style={{ background: gradient }}>
       <div className="flex items-start justify-between mb-6">
@@ -1851,48 +2520,63 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
           <p className="text-sm font-medium opacity-90">{card.bank}</p>
           <p className="text-xs opacity-70">{card.brand}</p>
         </div>
-        <CreditCard size={22} className="opacity-80" />
+        {onEdit && !isHistoricalView && (
+          <button onClick={() => setShowEditForm(true)} className="p-2 rounded-lg hover:bg-white/10" title="Editar cartão">
+            <Pencil size={16} className="opacity-80" />
+          </button>
+        )}
       </div>
       <div className="flex items-end justify-between mb-4">
         <div>
-          <p className="text-xs opacity-70 mb-1">Fatura atual</p>
+          <p className="text-xs opacity-70 mb-1">{isHistoricalView ? `Fatura de ${viewedCycle.label}` : 'Fatura atual'}</p>
           <p className="font-display text-2xl font-bold tabular-nums">{formatBRL(invoice)}</p>
         </div>
-        {invoice > 0 ? (
+        {!isHistoricalView && (invoice > 0 ? (
           <button onClick={() => setShowPayModal(true)} className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors shrink-0">
             Pagar fatura
           </button>
         ) : (
           <span className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-white/10 flex items-center gap-1 shrink-0"><Check size={12} /> Em dia</span>
-        )}
+        ))}
       </div>
-      <div className="mb-2">
-        <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden">
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, percentUsed)}%`, backgroundColor: barColor }} />
-        </div>
-      </div>
-      <div className="flex items-center justify-between text-xs opacity-80">
-        <span>{formatBRL(invoice)} de {formatBRL(card.limit)}</span>
-        <span>{percentUsed.toFixed(0)}% usado</span>
-      </div>
-      <div className="flex items-center justify-between text-xs opacity-70 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-        <span>Fecha dia {card.closingDay}</span>
-        <span className="text-right">
-          Próx. vencimento: {nextDueLabel}
-          {dueWasAdjusted && <span className="block opacity-70">(dia {card.dueDay}, antecipado p/ dia útil)</span>}
-        </span>
-      </div>
-      {card.paidThroughDate && (
-        <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
-      )}
-      {futureInstallments.length > 0 && onAdvanceInstallments && (
-        <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-          <span className="opacity-80">{futureInstallments.length} parcela(s) futura(s) — {formatBRL(futureTotal)}</span>
-          <span className="font-medium underline shrink-0">Antecipar</span>
-        </button>
+      {isHistoricalView ? (
+        <p className="text-xs opacity-70 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+          {invoiceCount} lançamento{invoiceCount === 1 ? '' : 's'} nessa fatura
+        </p>
+      ) : (
+        <>
+          <div className="mb-2">
+            <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${Math.min(100, percentUsed)}%`, backgroundColor: barColor }} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-xs opacity-80">
+            <span>{formatBRL(invoice)} de {formatBRL(card.limit)}</span>
+            <span>{percentUsed.toFixed(0)}% usado</span>
+          </div>
+          <div className="flex items-center justify-between text-xs opacity-70 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+            <span>Fecha dia {card.closingDay}</span>
+            <span className="text-right">
+              Próx. vencimento: {nextDueLabel}
+              {dueWasAdjusted && <span className="block opacity-70">(dia {card.dueDay}, antecipado p/ dia útil)</span>}
+            </span>
+          </div>
+          {card.paidThroughDate && (
+            <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
+          )}
+          {futureInstallments.length > 0 && onAdvanceInstallments && (
+            <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+              <span className="opacity-80">{futureInstallments.length} parcela(s) futura(s) — {formatBRL(futureTotal)}</span>
+              <span className="font-medium underline shrink-0">Antecipar</span>
+            </button>
+          )}
+        </>
       )}
       {showPayModal && (
         <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId) => onPayInvoice(card, invoice, accountId)} onClose={() => setShowPayModal(false)} />
+      )}
+      {showEditForm && (
+        <CardForm initial={card} accounts={accounts} pendingInvoiceCount={pendingInvoiceCount} onSave={(f) => { onEdit(f); setShowEditForm(false); }} onDelete={onDelete} onClose={() => setShowEditForm(false)} />
       )}
       {confirmAdvance && (
         <ConfirmModal
@@ -1907,20 +2591,33 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   );
 }
 
-const CARD_GRADIENTS = [
-  'linear-gradient(135deg, #3E4B37 0%, #232323 100%)',
-  'linear-gradient(135deg, #5D7052 0%, #3E4B37 100%)',
-  'linear-gradient(135deg, #6D6558 0%, #3A362E 100%)',
-];
+// Gera 5 tonalidades do cartão a partir da cor de destaque escolhida em Configurações — sempre
+// misturando com quase-preto (mantém o visual "cartão premium escuro" dos gradientes fixos
+// anteriores) em proporções crescentes, para que qualquer cor de destaque (incluindo o tema
+// Monocromático, que na prática é um cinza bem escuro) produza uma família de tons reconhecível
+// e nunca vire um cinza genérico igual pra todo mundo.
+function buildCardGradients(colorThemeKey) {
+  const theme = COLOR_THEMES[colorThemeKey] || COLOR_THEMES.default;
+  const base = theme.light; // sempre a variante clara/mais saturada, independente do tema claro/escuro do app
+  // Faixa mais larga que antes (0.14–0.86 em vez de 0.28–0.78) pra aumentar o contraste entre os
+  // tons extremos. Os 5 tons são gerados em ordem clara→escura e depois reordenados (1,3,5,2,4)
+  // pra que cartões vizinhos na grade nunca fiquem com tonalidades quase iguais lado a lado.
+  const tones = [0.14, 0.32, 0.50, 0.68, 0.86].map((amt) => {
+    const from = mixHex(base, '#0A0A0A', amt);
+    const to = mixHex(base, '#0A0A0A', Math.min(0.95, amt + 0.24));
+    return `linear-gradient(135deg, ${from} 0%, ${to} 100%)`;
+  });
+  return [tones[0], tones[2], tones[4], tones[1], tones[3]];
+}
 
-function CardsPreview({ cards, transactions, accounts, onPayInvoice, onAdvanceInstallments, onSeeAll }) {
+function CardsPreview({ cards, transactions, accounts, cardGradients, onPayInvoice, onAdvanceInstallments, onSeeAll }) {
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
       <SectionTitle action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todos <ArrowRight size={12} /></button>}>
         Cartões de crédito
       </SectionTitle>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />)}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {cards.map((c, i) => <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={cardGradients[i % cardGradients.length]} />)}
       </div>
     </Card>
   );
@@ -2032,30 +2729,55 @@ function InsightsSection({ insights }) {
    ============================================================ */
 
 function DashboardPage({ data, actions }) {
+  const { settings } = data;
   const kpis = computeKPIs(data.period, data.customRange, data.monthlyHistory, data.transactions, data.accounts, data.goals, data.caixinhas, data.settings.monthlySavingsTarget);
+  const v = (item) => isVisible(settings, 'dashboard', item);
+  const allBlocks = ['kpiSaldo', 'kpiReceitas', 'kpiDespesas', 'kpiEconomia', 'kpiMeta', 'kpiPatrimonio', 'evolutionChart', 'categoryDonut', 'recentTransactions', 'monthSummary', 'goalsSection', 'financialCalendar', 'cardsPreview', 'recurringPreview', 'investmentsPreview', 'insights'];
+  if (allBlocks.every((b) => !v(b))) {
+    return (
+      <Card>
+        <EmptyState icon={LayoutDashboard} title="Nenhum bloco selecionado" description='Todos os blocos do Dashboard estão ocultos. Vá em Configurações → "Personalização da interface" para reativar algum.' />
+      </Card>
+    );
+  }
+  const showKPIRow = ['kpiSaldo', 'kpiReceitas', 'kpiDespesas', 'kpiEconomia', 'kpiMeta', 'kpiPatrimonio'].some(v);
+  const showChartsRow = v('evolutionChart') || v('categoryDonut');
+  const showMiddleRow = v('recentTransactions') || v('monthSummary');
+  const showCalendarCardsRow = v('financialCalendar') || v('cardsPreview');
+  const showPreviewRow = v('recurringPreview') || v('investmentsPreview');
   return (
     <div className="space-y-6">
-      <KPIRow kpis={kpis} />
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-3"><EvolutionChart data={data.monthlyHistory} /></div>
-        <div className="lg:col-span-2"><CategoryDonut data={data.categoryComparison.current} /></div>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <RecentTransactions transactions={data.transactions} accounts={data.accounts} onEdit={actions.editTransaction} onDelete={actions.deleteTransaction} onSeeAll={() => actions.goTo('transacoes')} />
+      {showKPIRow && <KPIRow kpis={kpis} settings={settings} accounts={data.accounts} />}
+      {showChartsRow && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {v('evolutionChart') && <div className={v('categoryDonut') ? 'lg:col-span-3' : 'lg:col-span-5'}><EvolutionChart data={data.monthlyHistory} /></div>}
+          {v('categoryDonut') && <div className={v('evolutionChart') ? 'lg:col-span-2' : 'lg:col-span-5'}><CategoryDonut data={data.categoryComparison.current} /></div>}
         </div>
-        <MonthSummaryPanel transactions={data.transactions} kpis={kpis} />
-      </div>
-      <GoalsSection goals={data.goals} onAddFunds={actions.addGoalFunds} onDelete={actions.deleteGoal} onSeeAll={() => actions.goTo('metas')} compact />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <FinancialCalendar cards={data.cards} transactions={data.transactions} />
-        <CardsPreview cards={data.cards} transactions={data.transactions} accounts={data.accounts} onPayInvoice={actions.payCardInvoice} onAdvanceInstallments={actions.advanceAllFutureInstallments} onSeeAll={() => actions.goTo('cartoes')} />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecurringPreview recurring={data.recurring} onSeeAll={() => actions.goTo('recorrentes')} />
-        <InvestmentsPreview investments={data.investments} total={data.investmentsTotal} onSeeAll={() => actions.goTo('investimentos')} />
-      </div>
-      <InsightsSection insights={data.insights} />
+      )}
+      {showMiddleRow && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {v('recentTransactions') && (
+            <div className={v('monthSummary') ? 'lg:col-span-2' : 'lg:col-span-3'}>
+              <RecentTransactions transactions={data.transactions} accounts={data.accounts} onEdit={actions.editTransaction} onDelete={actions.deleteTransaction} onSeeAll={() => actions.goTo('transacoes')} />
+            </div>
+          )}
+          {v('monthSummary') && <div className={v('recentTransactions') ? '' : 'lg:col-span-3'}><MonthSummaryPanel transactions={data.transactions} kpis={kpis} /></div>}
+        </div>
+      )}
+      {v('goalsSection') && <GoalsSection goals={data.goals} onAddFunds={actions.addGoalFunds} onDelete={actions.deleteGoal} onSeeAll={() => actions.goTo('metas')} compact />}
+      {showCalendarCardsRow && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {v('financialCalendar') && <div className={v('cardsPreview') ? '' : 'lg:col-span-2'}><FinancialCalendar cards={data.cards} transactions={data.transactions} /></div>}
+          {v('cardsPreview') && <div className={v('financialCalendar') ? '' : 'lg:col-span-2'}><CardsPreview cards={data.cards} transactions={data.transactions} accounts={data.accounts} cardGradients={data.cardGradients} onPayInvoice={actions.payCardInvoice} onAdvanceInstallments={actions.advanceAllFutureInstallments} onSeeAll={() => actions.goTo('cartoes')} /></div>}
+        </div>
+      )}
+      {showPreviewRow && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {v('recurringPreview') && <div className={v('investmentsPreview') ? '' : 'lg:col-span-2'}><RecurringPreview recurring={data.recurring} onSeeAll={() => actions.goTo('recorrentes')} /></div>}
+          {v('investmentsPreview') && <div className={v('recurringPreview') ? '' : 'lg:col-span-2'}><InvestmentsPreview investments={data.investments} total={data.investmentsTotal} onSeeAll={() => actions.goTo('investimentos')} /></div>}
+        </div>
+      )}
+      {v('insights') && <InsightsSection insights={data.insights} />}
     </div>
   );
 }
@@ -2064,7 +2786,7 @@ function DashboardPage({ data, actions }) {
    FORMULÁRIO DE TRANSAÇÃO
    ============================================================ */
 
-function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onClose }) {
+function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onClose, onDelete }) {
   const [form, setForm] = useState(initial || {
     type: 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
     paymentMethod: 'Pix', date: new Date().toISOString().slice(0, 10), status: 'Pago',
@@ -2093,6 +2815,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
   const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
   const perInstallment = installmentCount > 0 ? installmentTotal / installmentCount : 0;
   const isEditingInstallment = !!initial?.installmentGroupId;
+  const currentInvoiceCycle = useMemo(
+    () => (isEditingInstallment && selectedCard ? getCardInvoiceCycle(selectedCard, form.date) : null),
+    [isEditingInstallment, selectedCard, form.date]
+  );
 
   function validate() {
     const e = {};
@@ -2117,8 +2843,9 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
   }
 
   function selectPaymentSource(v) {
-    if (!v) {
-      setForm({ ...form, cardId: null, benefitId: null, benefitType: null, status: form.status === 'Pendente' && form.cardId ? 'Pago' : form.status });
+    if (v.startsWith('account:')) {
+      const accountId = v.slice(8);
+      setForm({ ...form, account: accountId, cardId: null, benefitId: null, benefitType: null, status: form.status === 'Pendente' && form.cardId ? 'Pago' : form.status });
       setInstallmentEnabled(false);
     } else if (v.startsWith('card:')) {
       const cardId = v.slice(5);
@@ -2151,8 +2878,8 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
           ))}
         </div>
         {form.type === 'receita' && (
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: 'var(--text)' }}>
-            <input type="checkbox" checked={!!form.isSalary} onChange={(e) => setForm({ ...form, isSalary: e.target.checked, description: e.target.checked && !form.description ? 'Salário' : form.description })} className="focus-ring" />
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
+            <input type="checkbox" checked={!!form.isSalary} onChange={(e) => setForm({ ...form, isSalary: e.target.checked, description: e.target.checked && !form.description ? 'Salário' : form.description })} className="w-5 h-5 shrink-0 focus-ring" />
             É salário (CLT)? Calculamos o líquido estimado com INSS e IRRF.
           </label>
         )}
@@ -2164,14 +2891,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
 
         {form.isSalary && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--income-soft)' }}>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <FieldLabel error={errors.grossSalary}>Salário bruto</FieldLabel>
                 <CurrencyInput value={form.grossSalary} onChange={(v) => setForm({ ...form, grossSalary: v })} />
               </div>
               <div>
                 <FieldLabel>Dependentes (IR)</FieldLabel>
-                <input type="number" min={0} value={form.dependents} onChange={(e) => setForm({ ...form, dependents: Number(e.target.value) })} className={inputClass} style={inputStyle} />
+                <input type="number" inputMode="numeric" min={0} value={form.dependents} onChange={(e) => setForm({ ...form, dependents: Number(e.target.value) })} className={inputClass} style={inputStyle} />
               </div>
             </div>
             {cltBreakdown && (
@@ -2192,8 +2919,24 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
           </div>
         )}
 
+        {isEditingInstallment && selectedCard && currentInvoiceCycle && (
+          <div className="rounded-xl p-3 text-xs space-y-2" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+            <p style={{ color: 'var(--text-soft)' }}>
+              Está na fatura de <strong style={{ color: 'var(--text)' }}>{capitalizeFirst(new Date(currentInvoiceCycle.year, currentInvoiceCycle.month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</strong>. Se o banco colocou essa compra num mês diferente do esperado (comum perto do fechamento), dá pra mover a parcela:
+            </p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setForm({ ...form, date: shiftToAdjacentInvoiceCycle(selectedCard, form.date, -1) })} className="flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center justify-center gap-1" style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}>
+                <ChevronLeft size={12} /> Fatura anterior
+              </button>
+              <button type="button" onClick={() => setForm({ ...form, date: shiftToAdjacentInvoiceCycle(selectedCard, form.date, 1) })} className="flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center justify-center gap-1" style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}>
+                Próxima fatura <ChevronRight size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {installmentEnabled && !initial ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
               <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
@@ -2206,7 +2949,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <FieldLabel error={errors.amount}>Valor</FieldLabel>
               {form.isSalary ? (
@@ -2223,59 +2966,61 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             </div>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
               {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </Select>
           </div>
-          <div>
-            <FieldLabel error={errors.account}>Conta</FieldLabel>
-            <select value={form.account} disabled={!!form.cardId} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: form.cardId ? 0.6 : 1 }}>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-            </select>
-            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Definida automaticamente pela conta vinculada ao cartão escolhido — é de propósito, não um bug.</p>}
-          </div>
+          {form.type === 'receita' ? (
+            <div>
+              <FieldLabel error={errors.account}>Conta</FieldLabel>
+              <Select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
+              </Select>
+            </div>
+          ) : (
+            <div>
+              <FieldLabel error={errors.account}>Como foi pago</FieldLabel>
+              <Select
+                value={form.cardId ? `card:${form.cardId}` : form.benefitId ? `benefit:${form.benefitId}:${form.benefitType}` : `account:${form.account}`}
+                onChange={(e) => selectPaymentSource(e.target.value)}
+                className={inputClass} style={inputStyle}
+              >
+                <optgroup label="Contas (débito)">
+                  {accounts.map((a) => <option key={a.id} value={`account:${a.id}`}>{a.bank} ({a.type})</option>)}
+                </optgroup>
+                {cards.length > 0 && (
+                  <optgroup label="Cartões de crédito">
+                    {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.bank} — {c.brand}</option>)}
+                  </optgroup>
+                )}
+                {benefits.length > 0 && (
+                  <optgroup label="Vale-benefícios">
+                    {benefits.map((b) => [
+                      <option key={`${b.id}-food`} value={`benefit:${b.id}:foodBalance`}>{b.provider} — Alimentação (saldo {formatBRL(b.foodBalance)})</option>,
+                      <option key={`${b.id}-mob`} value={`benefit:${b.id}:mobilityBalance`}>{b.provider} — Transporte (saldo {formatBRL(b.mobilityBalance)})</option>,
+                    ])}
+                  </optgroup>
+                )}
+              </Select>
+            </div>
+          )}
         </div>
-        {form.type === 'despesa' && (cards.length > 0 || benefits.length > 0) && (
-          <div>
-            <FieldLabel>Cartão ou vale-benefícios (opcional)</FieldLabel>
-            <select
-              value={form.cardId ? `card:${form.cardId}` : form.benefitId ? `benefit:${form.benefitId}:${form.benefitType}` : ''}
-              onChange={(e) => selectPaymentSource(e.target.value)}
-              className={inputClass} style={inputStyle}
-            >
-              <option value="">Nenhum (débito direto da conta)</option>
-              {cards.length > 0 && (
-                <optgroup label="Cartões de crédito">
-                  {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.bank} — {c.brand}</option>)}
-                </optgroup>
-              )}
-              {benefits.length > 0 && (
-                <optgroup label="Vale-benefícios">
-                  {benefits.map((b) => [
-                    <option key={`${b.id}-food`} value={`benefit:${b.id}:foodBalance`}>{b.provider} — Alimentação (saldo {formatBRL(b.foodBalance)})</option>,
-                    <option key={`${b.id}-mob`} value={`benefit:${b.id}:mobilityBalance`}>{b.provider} — Transporte (saldo {formatBRL(b.mobilityBalance)})</option>,
-                  ])}
-                </optgroup>
-              )}
-            </select>
-            {selectedCard && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
-            {selectedBenefit && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>O valor é descontado automaticamente do saldo desse vale-benefícios ao salvar — sem precisar atualizar na mão.</p>}
-          </div>
-        )}
+        {selectedCard && <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
+        {selectedBenefit && <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>O valor é descontado automaticamente do saldo desse vale-benefícios ao salvar — sem precisar atualizar na mão.</p>}
         {form.type === 'despesa' && selectedCard && !initial && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: 'var(--text)' }}>
-              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) setInstallmentTotal(form.amount || 0); }} className="focus-ring" />
+            <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
+              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) setInstallmentTotal(form.amount || 0); }} className="w-5 h-5 shrink-0 focus-ring" />
               Compra parcelada
             </label>
             {installmentEnabled && (
               <>
                 <div>
                   <FieldLabel>Número de parcelas</FieldLabel>
-                  <input type="number" min={2} max={48} value={installmentCount} onChange={(e) => setInstallmentCount(Math.max(2, Math.min(48, Number(e.target.value) || 2)))} className={inputClass} style={inputStyle} />
+                  <input type="number" inputMode="numeric" min={2} max={48} value={installmentCount} onChange={(e) => setInstallmentCount(Math.max(2, Math.min(48, Number(e.target.value) || 2)))} className={inputClass} style={inputStyle} />
                 </div>
                 <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
                   {installmentCount}x de {formatBRL(perInstallment)}
@@ -2287,22 +3032,22 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             )}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Forma de pagamento</FieldLabel>
-            <select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className={inputClass} style={inputStyle}>
               {PAYMENT_METHODS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <select value={form.status} disabled={(installmentEnabled && !initial) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && !initial) || !!form.cardId ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={(installmentEnabled && !initial) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && !initial) || !!form.cardId ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
-            </select>
+            </Select>
             {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
           </div>
         </div>
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex items-center justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSubmit}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
         </div>
@@ -2310,8 +3055,6 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
     </Modal>
   );
 }
-
-/* ---------- Modal: revisão da importação de fatura (CSV) ---------- */
 
 function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
   const nubankCard = cards.find((c) => c.bank.toLowerCase().includes('nubank')) || cards[0];
@@ -2386,14 +3129,14 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
         <div>
           <FieldLabel>{useCard ? 'Lançar no cartão' : 'Lançar na conta'}</FieldLabel>
           {useCard ? (
-            <select value={targetCard} onChange={(e) => setTargetCard(e.target.value)} className={inputClass} style={inputStyle}>
+            <Select value={targetCard} onChange={(e) => setTargetCard(e.target.value)} className={inputClass} style={inputStyle}>
               {cards.map((c) => <option key={c.id} value={c.id}>{c.bank} — {c.brand}</option>)}
-            </select>
+            </Select>
           ) : (
             <>
-              <select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
+              <Select value={targetAccount} onChange={(e) => setTargetAccount(e.target.value)} className={inputClass} style={inputStyle}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-              </select>
+              </Select>
               <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Você ainda não cadastrou um cartão — os lançamentos vão debitar essa conta diretamente. Cadastre o cartão em "Cartões" para a fatura ser calculada automaticamente.</p>
             </>
           )}
@@ -2417,7 +3160,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
                 {rows.map((r) => (
                   <tr key={r.rowId} className="text-sm" style={{ borderTop: '1px solid var(--border)', opacity: r.include ? 1 : 0.5 }}>
                     <td className="py-2 pr-2">
-                      <input type="checkbox" checked={r.include} onChange={() => toggleRow(r.rowId)} className="focus-ring" />
+                      <input type="checkbox" checked={r.include} onChange={() => toggleRow(r.rowId)} className="w-5 h-5 focus-ring cursor-pointer" />
                     </td>
                     <td className="py-2 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(r.date)}</td>
                     <td className="py-2 pr-3">
@@ -2426,9 +3169,9 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
                       {r.isDuplicate && <span className="ml-2 text-xs font-medium" style={{ color: 'var(--alert)' }}>possível duplicata</span>}
                     </td>
                     <td className="py-2 pr-3">
-                      <select value={r.category} onChange={(e) => setRowCategory(r.rowId, e.target.value)} className="px-2 py-1.5 rounded-lg text-xs focus-ring" style={inputStyle}>
+                      <Select value={r.category} onChange={(e) => setRowCategory(r.rowId, e.target.value)} className="px-2 py-1.5 rounded-lg text-base sm:text-xs focus-ring" style={inputStyle}>
                         {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      </Select>
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums" style={{ color: 'var(--expense)' }}>{formatBRL(r.amount)}</td>
                   </tr>
@@ -2451,7 +3194,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ filterType, title, transactions, accounts, cards, benefits = [], onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura }) {
+function TransactionsPage({ filterType, title, transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura }) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
@@ -2461,6 +3204,12 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const filtersRef = useRef(null);
+  const exportMenuRef = useRef(null);
+  const activeFilterCount = [categoryFilter, accountFilter, statusFilter].filter((f) => f !== 'all').length;
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
   const pageSize = 8;
@@ -2546,7 +3295,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
   return (
     <div className="space-y-6 print-area">
-      {onGoToFatura && (
+      {onGoToFatura && isVisible(settings, 'transacoes', 'faturaBanner') && (
         <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 no-print" style={{ backgroundColor: 'var(--primary-soft)' }}>
           <p className="text-sm" style={{ color: 'var(--primary-dark)' }}>
             Esta lista mostra tudo, incluindo parcelas de meses futuros. Pra ver só o que cai neste mês (tipo uma fatura), use o acompanhamento mensal.
@@ -2554,7 +3303,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
           <Button size="sm" variant="secondary" icon={CalendarIcon} onClick={onGoToFatura}>Fatura mensal</Button>
         </div>
       )}
-      {filterType !== 'all' && (
+      {filterType !== 'all' && isVisible(settings, 'transacoes', 'statCards') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard title={`Total de ${title.toLowerCase()}`} value={formatBRL(filterType === 'receita' ? totalReceitas : totalDespesas)} description="No filtro atual" icon={filterType === 'receita' ? TrendingUp : TrendingDown} color={filterType === 'receita' ? 'var(--income)' : 'var(--expense)'} soft={filterType === 'receita' ? 'var(--income-soft)' : 'var(--expense-soft)'} />
           <StatCard title="Lançamentos no filtro" value={String(filtered.length)} description="Itens encontrados" icon={ArrowLeftRight} color="var(--invest)" soft="var(--invest-soft)" />
@@ -2562,80 +3311,194 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
       )}
 
       <Card padding="p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2 no-print">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar..." className="w-full pl-8 pr-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle} />
+        <div className="space-y-2 no-print">
+          {/* Linha 1: busca + filtros. flex-nowrap de propósito — com flex-wrap, ao aparecer o
+              badge de contagem no botão "Filtros" ele deixava de caber ao lado da busca (que
+              tinha uma largura mínima de 180px) e quebrava sozinho pra uma 2ª linha, enquanto a
+              busca esticava pra ocupar a linha inteira. Com min-w-0 no mobile, a busca encolhe
+              o quanto for preciso pra sempre sobrar espaço pro botão de filtros do lado. */}
+          <div className="flex flex-nowrap items-center gap-2">
+            <div className="relative flex-1 min-w-0 sm:min-w-[180px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+            </div>
+
+            {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todas categorias</option>
+                {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+              <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todas contas</option>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
+              </Select>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Todos status</option>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </Select>
+            </div>
+            <div className="sm:hidden shrink-0">
+              <button
+                ref={filtersRef}
+                onClick={() => setShowFilters((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+                style={inputStyle}
+              >
+                <Filter size={14} color="var(--text-soft)" /> Filtros
+                {activeFilterCount > 0 && (
+                  <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
+                )}
+              </button>
+              <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="center" className="p-3 space-y-2.5">
+                <Select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todas categorias</option>
+                  {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+                <Select value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todas contas</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
+                </Select>
+                <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Todos status</option>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+                {activeFilterCount > 0 && (
+                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); setShowFilters(false); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                )}
+              </Popover>
+            </div>
           </div>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-            <option value="all">Todas categorias</option>
-            {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-            <option value="all">Todas contas</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank}</option>)}
-          </select>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
-            <option value="all">Todos status</option>
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <div className="flex-1" />
-          <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
-          <Button variant="secondary" size="sm" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
-          <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV}>CSV</Button>
-          <Button variant="secondary" size="sm" icon={Download} onClick={exportExcel}>Excel</Button>
-          <Button variant="secondary" size="sm" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
-          <Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
+
+          {/* Linha 2: importar, exportar/imprimir e novo lançamento — sempre nessa linha,
+              nunca estoura pra uma 3ª (tamanhos compactos no mobile garantem isso). */}
+          <div className="flex items-center gap-2">
+            <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
+            <Button variant="secondary" size="toolbar" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
+
+            {/* Telas maiores: botões de exportação individuais. No mobile viram um menu "⋮" — 3
+                botões de texto a mais nessa linha eram demais pra uma tela estreita. */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button variant="secondary" size="toolbar" icon={Download} onClick={exportCSV}>CSV</Button>
+              <Button variant="secondary" size="toolbar" icon={Download} onClick={exportExcel}>Excel</Button>
+              <Button variant="secondary" size="toolbar" icon={FileText} onClick={() => window.print()}>Imprimir</Button>
+            </div>
+
+            <div className="flex-1" />
+
+            <Button size="toolbar" icon={Plus} onClick={() => setShowForm(true)}>Novo</Button>
+
+            <div className="sm:hidden">
+              <button ref={exportMenuRef} onClick={() => setShowExportMenu((v) => !v)} className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0" style={inputStyle} title="Exportar ou imprimir">
+                <MoreVertical size={14} color="var(--text-soft)" />
+              </button>
+              <Popover open={showExportMenu} onClose={() => setShowExportMenu(false)} triggerRef={exportMenuRef} width={192} align="center" className="p-1.5">
+                <button onClick={() => { exportCSV(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> CSV</button>
+                <button onClick={() => { exportExcel(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><Download size={14} color="var(--text-soft)" /> Excel</button>
+                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full text-left text-sm px-3 py-2.5 rounded-lg hover:bg-black/5 flex items-center gap-2.5" style={{ color: 'var(--text)' }}><FileText size={14} color="var(--text-soft)" /> Imprimir</button>
+              </Popover>
+            </div>
+          </div>
         </div>
+        {activeFilterCount > 0 && (
+          <div className="flex sm:hidden items-center flex-wrap gap-1.5 mt-2">
+            {categoryFilter !== 'all' && <Badge color="var(--primary)" soft="var(--primary-soft)">{categoryFilter}</Badge>}
+            {accountFilter !== 'all' && <Badge color="var(--primary)" soft="var(--primary-soft)">{accounts.find((a) => a.id === accountFilter)?.bank}</Badge>}
+            {statusFilter !== 'all' && <Badge color="var(--primary)" soft="var(--primary-soft)">{statusFilter}</Badge>}
+          </div>
+        )}
 
         {pageData.length === 0 ? (
           <EmptyState icon={Search} title="Nenhuma transação encontrada" description="Ajuste os filtros ou adicione um novo lançamento." />
         ) : (
-          <div className="overflow-x-auto mt-4 -mx-1">
-            <table className="w-full min-w-[720px]">
-              <thead>
-                <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
-                  {sortableColumns.map((c) => (
-                    <th key={c.key} className={`pb-2 pr-3 font-medium cursor-pointer select-none${c.center ? ' text-center' : ''}`} onClick={() => handleSort(c.key)}>
-                      <span className={`flex items-center gap-1${c.center ? ' justify-center' : ''}`}>{c.label} {sortConfig.key === c.key && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
-                    </th>
-                  ))}
-                  <th className="pb-2 pr-3 font-medium">Conta</th>
-                  <th className="pb-2 pr-3 font-medium text-center">Pagamento</th>
-                  <th className="pb-2 pr-1 font-medium no-print"></th>
-                </tr>
-              </thead>
-              <tbody style={{ borderTop: '1px solid var(--border)' }}>
-                {pageData.map((tx) => (
-                  <tr key={tx.id} className="text-sm hover:bg-black/[0.02]">
-                    <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
-                    <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
-                      {tx.description}
-                      {tx.installmentGroupId && (
-                        <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                          {tx.installmentIndex}/{tx.installmentCount}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 pr-3 text-center"><CategoryBadge category={tx.category} /></td>
-                    <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</td>
-                    <td className="py-3 pr-3 text-center"><StatusBadge status={tx.status} type={tx.type} /></td>
-                    <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida'}</td>
-                    <td className="py-3 pr-3 whitespace-nowrap text-center" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
-                    <td className="py-3 pr-1 no-print">
-                      <div className="flex items-center gap-1">
+          <>
+            {/* Mobile: cards com swipe (arraste pra esquerda) revelando editar/excluir — uma
+                tabela de 8 colunas não cabe numa tela de celular sem cortar informação. */}
+            <div className="sm:hidden mt-4 space-y-2">
+              {pageData.map((tx) => {
+                const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+                const card = tx.cardId ? cards.find((c) => c.id === tx.cardId) : null;
+                const accName = accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida';
+                return (
+                  <SwipeableRow
+                    key={tx.id} onEdit={() => setEditing(tx)} onDelete={() => onDelete(tx)}
+                    deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
+                  >
+                    <div className="flex items-center gap-3 p-3">
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
+                            {tx.description}
+                            {tx.installmentGroupId && <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{tx.installmentIndex}/{tx.installmentCount}</span>}
+                          </p>
+                          <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
+                          <span className="shrink-0">{formatDate(tx.date)}</span>
+                          <span className="shrink-0">·</span>
+                          <span className="truncate">{card ? `Crédito · ${card.bank}` : `Débito · ${accName}`}</span>
+                        </div>
                         {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
-                          <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-1.5 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                          <button onClick={() => setConfirmMarkPaid(tx)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
+                            <Check size={12} /> Marcar como pago
+                          </button>
                         )}
-                        <button onClick={() => setEditing(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Pencil size={14} color="var(--text-soft)" /></button>
-                        <button onClick={() => onDelete(tx)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={14} color="var(--expense)" /></button>
                       </div>
-                    </td>
+                    </div>
+                  </SwipeableRow>
+                );
+              })}
+              <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>
+            </div>
+
+            {/* Desktop/tablet: tabela completa */}
+            <div className="hidden sm:block overflow-x-auto mt-4 -mx-1">
+              <table className="w-full min-w-[720px]">
+                <thead>
+                  <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
+                    {sortableColumns.map((c) => (
+                      <th key={c.key} className={`pb-2 pr-3 font-medium cursor-pointer select-none${c.center ? ' text-center' : ''}`} onClick={() => handleSort(c.key)}>
+                        <span className={`flex items-center gap-1${c.center ? ' justify-center' : ''}`}>{c.label} {sortConfig.key === c.key && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
+                      </th>
+                    ))}
+                    <th className="pb-2 pr-3 font-medium">Conta</th>
+                    <th className="pb-2 pr-3 font-medium text-center">Pagamento</th>
+                    <th className="pb-2 pr-1 font-medium no-print"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody style={{ borderTop: '1px solid var(--border)' }}>
+                  {pageData.map((tx) => (
+                    <tr key={tx.id} className="text-sm hover:bg-black/[0.02]">
+                      <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
+                      <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
+                        {tx.description}
+                        {tx.installmentGroupId && (
+                          <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+                            {tx.installmentIndex}/{tx.installmentCount}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-3 text-center"><CategoryBadge category={tx.category} /></td>
+                      <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</td>
+                      <td className="py-3 pr-3 text-center"><StatusBadge status={tx.status} type={tx.type} /></td>
+                      <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida'}</td>
+                      <td className="py-3 pr-3 whitespace-nowrap text-center" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
+                      <td className="py-3 pr-1 no-print">
+                        <div className="flex items-center gap-1">
+                          {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
+                            <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                          )}
+                          <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                          <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {totalPages > 1 && (
@@ -2650,7 +3513,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
       </Card>
 
       {showForm && <TransactionForm accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
-      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} />}
+      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} onDelete={(tx) => { onDelete(tx); setEditing(null); }} />}
       {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} cards={cards} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
       {confirmMarkPaid && (
         <ConfirmModal
@@ -2659,6 +3522,14 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
           variant="primary" confirmLabel="Marcar como pago"
           onConfirm={() => { onMarkPaid(confirmMarkPaid); setConfirmMarkPaid(null); }}
           onClose={() => setConfirmMarkPaid(null)}
+        />
+      )}
+      {confirmDeleteRow && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteRow.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteRow); setConfirmDeleteRow(null); }}
+          onClose={() => setConfirmDeleteRow(null)}
         />
       )}
     </div>
@@ -2681,14 +3552,15 @@ function AccountForm({ onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Tipo</FieldLabel>
-          <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass} style={inputStyle}>
             <option>Conta Corrente</option>
             <option>Poupança</option>
-          </select>
+          </Select>
         </div>
         <div>
           <FieldLabel>Saldo inicial</FieldLabel>
-          <CurrencyInput value={form.balance} onChange={(v) => setForm({ ...form, balance: v })} />
+          <SignedCurrencyInput value={form.balance} onChange={(v) => setForm({ ...form, balance: v })} />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>A conta pode ficar negativa (cheque especial, conta estourada etc) — use o botão + / − pra alternar o sinal.</p>
         </div>
         <div>
           <FieldLabel>Alerta de saldo baixo (opcional)</FieldLabel>
@@ -2741,7 +3613,7 @@ function UpdateValueControl({ currentValue, onUpdate, label = 'Atualizar valor' 
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: usei parte pra um imprevisto" className={inputClass} style={inputStyle} />
         <div className="flex items-center gap-2">
           <Button size="sm" onClick={handleConfirmDecrease}>Confirmar</Button>
-          <button onClick={cancel} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+          <button onClick={cancel} className="p-2" title="Cancelar"><X size={14} color="var(--text-soft)" /></button>
         </div>
       </div>
     );
@@ -2750,7 +3622,7 @@ function UpdateValueControl({ currentValue, onUpdate, label = 'Atualizar valor' 
     <div className="flex items-center gap-2 mt-1.5">
       <CurrencyInput value={value} onChange={setValue} />
       <Button size="sm" onClick={handleSubmit}>OK</Button>
-      <button onClick={cancel} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+      <button onClick={cancel} className="p-2" title="Cancelar"><X size={14} color="var(--text-soft)" /></button>
     </div>
   );
 }
@@ -2768,7 +3640,7 @@ function BalanceHistoryLog({ history }) {
             <div className="flex items-center gap-1.5">
               <span className="tabular-nums font-medium" style={{ color: 'var(--text)' }}>{formatBRL(h.value)}</span>
               {h.note && (
-                <button onClick={() => setOpenNote(openNote === i ? null : i)} className="p-0.5 rounded hover:bg-black/5 shrink-0">
+                <button onClick={() => setOpenNote(openNote === i ? null : i)} className="p-1 rounded hover:bg-black/5 shrink-0">
                   <MessageCircle size={12} color="var(--primary)" />
                 </button>
               )}
@@ -2797,9 +3669,9 @@ function CaixinhaForm({ accounts, onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Conta vinculada</FieldLabel>
-          <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-          </select>
+          </Select>
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
@@ -2822,7 +3694,7 @@ function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{caixinha.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{accountName}</p>
         </div>
-        <button onClick={() => setConfirmDelete(true)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--text-soft)" /></button>
+        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--text-soft)" /></button>
       </div>
       <p className="font-display text-lg font-bold tabular-nums mb-2" style={{ color: 'var(--text)' }}>{formatBRL(caixinha.balance)}</p>
       <UpdateValueControl currentValue={caixinha.balance} onUpdate={(value, note) => onUpdateValue(caixinha, value, note)} />
@@ -2853,41 +3725,48 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
   const [editingBalance, setEditingBalance] = useState(false);
   const [balanceValue, setBalanceValue] = useState(acc.balance);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const atRisk = acc.alertThreshold > 0 && acc.balance <= acc.alertThreshold;
+  const isNegative = acc.balance < 0;
+  const atRisk = (acc.alertThreshold > 0 && acc.balance <= acc.alertThreshold) || isNegative;
   return (
     <Card className="animate-fade-up" style={atRisk ? { border: '1px solid var(--expense)' } : undefined}>
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex items-start gap-3 mb-3">
         <IconCircle icon={Icon} color="var(--invest)" soft="var(--invest-soft)" />
-        <button onClick={() => setConfirmDelete(true)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={14} color="var(--text-soft)" /></button>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{acc.bank}</p>
+          <Badge color="var(--invest)" soft="var(--invest-soft)">{acc.type}</Badge>
+        </div>
+        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
       </div>
-      <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>{acc.bank}</p>
-      <Badge color="var(--invest)" soft="var(--invest-soft)">{acc.type}</Badge>
       {!editingBalance ? (
-        <div className="flex items-center gap-1.5 mt-3">
-          <p className="font-display text-xl font-bold tabular-nums" style={{ color: atRisk ? 'var(--expense)' : 'var(--text)' }}>{formatBRL(acc.balance)}</p>
-          <button onClick={() => { setBalanceValue(acc.balance); setEditingBalance(true); }} className="p-1 rounded-lg hover:bg-black/5"><Pencil size={12} color="var(--text-soft)" /></button>
+        <div className="flex items-center gap-1.5 mt-3 min-w-0">
+          <p className="font-display text-xl font-bold tabular-nums truncate" style={{ color: atRisk ? 'var(--expense)' : 'var(--text)' }}>{formatBRL(acc.balance)}</p>
+          <button onClick={() => { setBalanceValue(acc.balance); setEditingBalance(true); }} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar saldo"><Pencil size={12} color="var(--text-soft)" /></button>
         </div>
       ) : (
-        <div className="flex items-center gap-2 mt-3">
-          <CurrencyInput value={balanceValue} onChange={setBalanceValue} />
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <SignedCurrencyInput value={balanceValue} onChange={setBalanceValue} />
           <Button size="sm" onClick={() => { onSetBalance(acc, balanceValue); setEditingBalance(false); }}>OK</Button>
-          <button onClick={() => setEditingBalance(false)} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+          <button onClick={() => setEditingBalance(false)} className="p-2" title="Cancelar"><X size={14} color="var(--text-soft)" /></button>
         </div>
       )}
-      {atRisk && (
-        <p className="text-xs flex items-center gap-1 mt-1" style={{ color: 'var(--expense)' }}>
-          <AlertCircle size={12} /> Saldo em zona de risco (abaixo de {formatBRL(acc.alertThreshold)})
+      {isNegative ? (
+        <p className="text-xs flex items-start gap-1 mt-1" style={{ color: 'var(--expense)' }}>
+          <AlertCircle size={12} className="mt-0.5 shrink-0" /> Conta negativa
+        </p>
+      ) : atRisk && (
+        <p className="text-xs flex items-start gap-1 mt-1" style={{ color: 'var(--expense)' }}>
+          <AlertCircle size={12} className="mt-0.5 shrink-0" /> Saldo em zona de risco (abaixo de {formatBRL(acc.alertThreshold)})
         </p>
       )}
       {!editingThreshold ? (
-        <button onClick={() => setEditingThreshold(true)} className="text-xs font-medium mt-3 flex items-center gap-1" style={{ color: 'var(--primary)' }}>
-          <Bell size={12} /> {acc.alertThreshold > 0 ? `Alerta em ${formatBRL(acc.alertThreshold)}` : 'Definir alerta de saldo baixo'}
+        <button onClick={() => setEditingThreshold(true)} className="text-xs font-medium mt-3 flex items-start gap-1 text-left" style={{ color: 'var(--primary)' }}>
+          <Bell size={12} className="mt-0.5 shrink-0" /> <span>{acc.alertThreshold > 0 ? `Alerta em ${formatBRL(acc.alertThreshold)}` : 'Definir alerta de saldo baixo'}</span>
         </button>
       ) : (
-        <div className="flex items-center gap-2 mt-3">
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
           <CurrencyInput value={thresholdValue} onChange={setThresholdValue} />
           <Button size="sm" onClick={() => { onSetThreshold(acc, thresholdValue); setEditingThreshold(false); }}>OK</Button>
-          <button onClick={() => setEditingThreshold(false)} className="p-2"><X size={14} color="var(--text-soft)" /></button>
+          <button onClick={() => setEditingThreshold(false)} className="p-2" title="Cancelar"><X size={14} color="var(--text-soft)" /></button>
         </div>
       )}
       {confirmDelete && (
@@ -2904,18 +3783,20 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
   );
 }
 
-function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onDeleteCaixinha, onUpdateCaixinhaValue }) {
+function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onDeleteCaixinha, onUpdateCaixinhaValue }) {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [showCaixinhaForm, setShowCaixinhaForm] = useState(false);
   const total = accounts.reduce((s, a) => s + a.balance, 0);
   return (
     <div className="space-y-6">
-      <Card>
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Saldo total em contas</p>
-        </div>
-        <p className="font-display text-3xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</p>
-      </Card>
+      {isVisible(settings, 'contas', 'saldoTotalCard') && (
+        <Card>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Saldo total em contas</p>
+          </div>
+          <p className="font-display text-3xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</p>
+        </Card>
+      )}
 
       <div>
         <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowAccountForm(true)}>Nova conta</Button>}>Suas contas</SectionTitle>
@@ -2927,20 +3808,22 @@ function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDelet
         </div>
       </div>
 
-      <div>
-        <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowCaixinhaForm(true)}>Nova caixinha</Button>}>
-          Caixinhas <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>reservas flexíveis dentro das suas contas</span>
-        </SectionTitle>
-        {caixinhas.length === 0 ? (
-          <Card><EmptyState icon={PiggyBank} title="Nenhuma caixinha criada" description="Crie caixinhas para separar dinheiro para objetivos do dia a dia." /></Card>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {caixinhas.map((cx) => (
-              <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onUpdateValue={onUpdateCaixinhaValue} onDelete={onDeleteCaixinha} />
-            ))}
-          </div>
-        )}
-      </div>
+      {isVisible(settings, 'contas', 'caixinhas') && (
+        <div>
+          <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowCaixinhaForm(true)}>Nova caixinha</Button>}>
+            Caixinhas <span className="text-xs font-normal" style={{ color: 'var(--text-soft)' }}>reservas flexíveis dentro das suas contas</span>
+          </SectionTitle>
+          {caixinhas.length === 0 ? (
+            <Card><EmptyState icon={PiggyBank} title="Nenhuma caixinha criada" description="Crie caixinhas para separar dinheiro para objetivos do dia a dia." /></Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {caixinhas.map((cx) => (
+                <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onUpdateValue={onUpdateCaixinhaValue} onDelete={onDeleteCaixinha} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {showAccountForm && <AccountForm onSave={(f) => { onAddAccount(f); setShowAccountForm(false); }} onClose={() => setShowAccountForm(false)} />}
       {showCaixinhaForm && <CaixinhaForm accounts={accounts} onSave={(f) => { onAddCaixinha(f); setShowCaixinhaForm(false); }} onClose={() => setShowCaixinhaForm(false)} />}
@@ -2952,9 +3835,10 @@ function AccountsPage({ accounts, caixinhas, transactions, onAddAccount, onDelet
    PÁGINA: CARTÕES
    ============================================================ */
 
-function CardForm({ accounts, onSave, onClose }) {
-  const [form, setForm] = useState({ bank: '', brand: '', accountId: accounts[0]?.id || '', limit: 0, closingDay: 1, dueDay: 10, paidThroughDate: null });
+function CardForm({ initial, accounts, pendingInvoiceCount = 0, onSave, onDelete, onClose }) {
+  const [form, setForm] = useState(initial || { bank: '', brand: '', accountId: accounts[0]?.id || '', limit: 0, closingDay: 1, dueDay: 10, paidThroughDate: null });
   const [errors, setErrors] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const clampDay = (v) => Math.min(31, Math.max(1, Math.round(v) || 1));
   function validate() {
     const e = {};
@@ -2965,9 +3849,9 @@ function CardForm({ accounts, onSave, onClose }) {
     return Object.keys(e).length === 0;
   }
   return (
-    <Modal title="Novo cartão" onClose={onClose}>
+    <Modal title={initial ? 'Editar cartão' : 'Novo cartão'} onClose={onClose}>
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel error={errors.bank}>Banco</FieldLabel>
             <input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Nubank" />
@@ -2979,25 +3863,48 @@ function CardForm({ accounts, onSave, onClose }) {
         </div>
         <div>
           <FieldLabel error={errors.accountId}>Conta que paga a fatura</FieldLabel>
-          <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} className={inputClass} style={inputStyle}>
             {accounts.length === 0 && <option value="">Nenhuma conta cadastrada</option>}
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
-          </select>
+          </Select>
         </div>
         <div>
           <FieldLabel error={errors.limit}>Limite total</FieldLabel>
           <CurrencyInput value={form.limit} onChange={(v) => setForm({ ...form, limit: v })} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><FieldLabel>Dia do fechamento</FieldLabel><input type="number" min={1} max={31} value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, closingDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
-          <div><FieldLabel>Dia do vencimento</FieldLabel><input type="number" min={1} max={31} value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, dueDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div><FieldLabel>Dia do fechamento</FieldLabel><input type="number" inputMode="numeric" min={1} max={31} value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, closingDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
+          <div><FieldLabel>Dia do vencimento</FieldLabel><input type="number" inputMode="numeric" min={1} max={31} value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, dueDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
         </div>
         <p className="text-xs" style={{ color: 'var(--text-soft)' }}>A fatura é calculada automaticamente a partir dos lançamentos feitos neste cartão — não precisa informar um valor inicial.</p>
-        <div className="flex justify-end gap-3 pt-2">
-          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!validate()) return; onSave({ ...form, closingDay: clampDay(form.closingDay), dueDay: clampDay(form.dueDay) }); }}>Adicionar cartão</Button>
+        <div className="flex items-center justify-between gap-3 pt-2">
+          {initial && onDelete ? (
+            <button onClick={() => setConfirmDelete(true)} className="text-xs font-medium flex items-center gap-1 shrink-0" style={{ color: 'var(--expense)' }}>
+              <Trash2 size={13} /> Excluir cartão
+            </button>
+          ) : <span />}
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+            <Button onClick={() => { if (!validate()) return; onSave({ ...form, closingDay: clampDay(form.closingDay), dueDay: clampDay(form.dueDay) }); }}>{initial ? 'Salvar' : 'Adicionar cartão'}</Button>
+          </div>
         </div>
       </div>
+      {confirmDelete && (pendingInvoiceCount > 0 ? (
+        <ConfirmModal
+          title="Não é possível excluir"
+          description={`Este cartão ainda tem ${pendingInvoiceCount} lançamento(s) com fatura em aberto (pendente). Pague a fatura ou edite/exclua esses lançamentos antes de excluir o cartão.`}
+          confirmLabel="Entendi" variant="primary"
+          onConfirm={() => setConfirmDelete(false)}
+          onClose={() => setConfirmDelete(false)}
+        />
+      ) : (
+        <ConfirmModal
+          title="Excluir cartão"
+          description={`Tem certeza que deseja excluir o cartão "${form.bank}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(initial); onClose(); }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      ))}
     </Modal>
   );
 }
@@ -3014,7 +3921,7 @@ function BenefitForm({ onSave, onClose }) {
           <FieldLabel error={error}>Fornecedor</FieldLabel>
           <input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Flash" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><FieldLabel>Saldo alimentação</FieldLabel><CurrencyInput value={form.foodBalance} onChange={(v) => setForm({ ...form, foodBalance: v })} /></div>
           <div><FieldLabel>Saldo transporte</FieldLabel><CurrencyInput value={form.mobilityBalance} onChange={(v) => setForm({ ...form, mobilityBalance: v })} /></div>
         </div>
@@ -3055,7 +3962,7 @@ function BenefitCard({ benefit, onUpdate, onDelete }) {
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{benefit.provider}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Vale-benefícios</p>
         </div>
-        <button onClick={() => onDelete(benefit)} className="p-1 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--text-soft)" /></button>
+        <button onClick={() => onDelete(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--text-soft)" /></button>
       </div>
       <div className="grid grid-cols-1 gap-3">
         <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} history={benefit.foodHistory} onUpdate={(value, note) => onUpdate(benefit, 'foodBalance', value, note)} />
@@ -3067,11 +3974,28 @@ function BenefitCard({ benefit, onUpdate, onDelete }) {
 
 /* ---------- Fatura mensal (acompanhamento por mês, separando crédito de débito) ---------- */
 
-function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdvanceInstallments, onMarkPaid }) {
+function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="flex items-center gap-1">
+        <button onClick={onPrev} className="p-2 rounded-lg hover:bg-black/5" title="Mês anterior"><ChevronLeft size={16} /></button>
+        <p className="text-sm font-medium min-w-[150px] text-center" style={{ color: 'var(--text)' }}>{label}</p>
+        <button onClick={onNext} className="p-2 rounded-lg hover:bg-black/5" title="Próximo mês"><ChevronRight size={16} /></button>
+      </div>
+      {monthOffset !== 0 && (
+        <button onClick={onToday} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>hoje</button>
+      )}
+    </div>
+  );
+}
+
+function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> | 'debito'
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
+  const [editingTx, setEditingTx] = useState(null);
 
   const refDate = useMemo(() => {
     const d = new Date();
@@ -3082,13 +4006,23 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
   const year = refDate.getFullYear();
   const month = refDate.getMonth();
   const monthLabel = refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const viewedCycle = useMemo(() => ({ year, month, label: capitalizeFirst(monthLabel) }), [year, month, monthLabel]);
   const visibleCards = cardFilter === 'all' || cardFilter === 'debito' ? cards : cards.filter((c) => c.id === cardFilter);
 
   // "Fatura" mostra só crédito, porque é a única que faz sentido marcar como paga (a compra em
-  // débito já saiu da conta na hora ou é agendada, não existe "fatura" pra ela).
+  // débito já saiu da conta na hora ou é agendada, não existe "fatura" pra ela). Agrupa por
+  // CICLO da fatura (respeitando o dia de fechamento de cada cartão), não pelo mês-calendário
+  // bruto da compra — por isso cada cartão é avaliado com seu próprio getCardInvoiceCycle.
   const faturaTx = useMemo(() => transactions
-    .filter((t) => t.type === 'despesa' && t.cardId && (cardFilter === 'all' || cardFilter === t.cardId) && isSameMonth(t.date, year, month))
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month]);
+    .filter((t) => {
+      if (t.type !== 'despesa' || !t.cardId) return false;
+      if (cardFilter !== 'all' && cardFilter !== t.cardId) return false;
+      const card = cards.find((c) => c.id === t.cardId);
+      if (!card) return false;
+      const cycle = getCardInvoiceCycle(card, t.date);
+      return cycle.year === year && cycle.month === month;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, cards]);
 
   // "Todas as despesas do mês" mistura débito e crédito de propósito, só pra visualizar o mês
   // inteiro — sem botão de pagar fatura, porque débito não tem esse conceito.
@@ -3099,42 +4033,53 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
   const total = list.reduce((s, t) => s + t.amount, 0);
+  // Uma única tag resumindo a fatura inteira, em vez de repetir Pago/Pendente em cada linha (que
+  // normalmente é tudo igual, já que o pagamento acontece de uma vez pra fatura toda).
+  const faturaStatus = useMemo(() => {
+    if (subview !== 'fatura' || faturaTx.length === 0) return null;
+    const paidCount = faturaTx.filter((t) => t.status === 'Pago').length;
+    if (paidCount === faturaTx.length) return { label: 'Fatura paga', color: 'var(--income)', soft: 'var(--income-soft)' };
+    if (paidCount === 0) return { label: 'Fatura pendente', color: 'var(--alert)', soft: 'var(--alert-soft)' };
+    return { label: 'Fatura paga parcialmente', color: 'var(--alert)', soft: 'var(--alert-soft)' };
+  }, [subview, faturaTx]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
-          <button onClick={() => setMonthOffset((m) => m - 1)} className="p-2 rounded-lg hover:bg-black/5"><ChevronLeft size={16} /></button>
-          <p className="text-sm font-medium capitalize min-w-[150px] text-center" style={{ color: 'var(--text)' }}>{monthLabel}</p>
-          <button onClick={() => setMonthOffset((m) => m + 1)} className="p-2 rounded-lg hover:bg-black/5"><ChevronRight size={16} /></button>
-          {monthOffset !== 0 && (
-            <button onClick={() => setMonthOffset(0)} className="text-xs font-medium ml-1" style={{ color: 'var(--primary)' }}>Hoje</button>
-          )}
-        </div>
-        {cards.length > 0 && (
-          <select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
+      <div className="flex justify-center">
+        <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
+      </div>
+      {cards.length > 0 && (
+        <div className="flex justify-center sm:justify-end">
+          <Select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 'auto' }}>
             <option value="all">Todos os cartões</option>
             {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
             <option value="debito">Só débito (sem cartão)</option>
-          </select>
-        )}
-      </div>
+          </Select>
+        </div>
+      )}
 
       {cardFilter !== 'debito' && visibleCards.length > 0 && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {visibleCards.map((c, i) => (
-              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
+              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={cardGradients[i % cardGradients.length]} viewedCycle={monthOffset === 0 ? null : viewedCycle} />
             ))}
           </div>
           <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>
-            "Pagar fatura" sempre paga a fatura real em aberto do cartão, mesmo navegando por outro mês aqui embaixo.
+            {monthOffset === 0
+              ? '"Pagar fatura" sempre paga a fatura real em aberto do cartão.'
+              : 'Navegando por outro mês: os cartões acima mostram o total daquela fatura específica (sem ação de pagamento, que só existe pra fatura atual).'}
           </p>
+          {/* Segunda cópia do navegador de mês, logo abaixo dos cartões — evita ter que rolar até
+              o topo da página pra trocar de mês quando os lançamentos ficam mais abaixo. */}
+          <div className="flex justify-center">
+            <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
+          </div>
         </>
       )}
 
       <Card>
-        <div className="flex items-center gap-1 mb-4 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--bg)' }}>
+        <div className="flex flex-wrap items-center gap-1 mb-4 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
           <button
             onClick={() => setSubview('fatura')}
             className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -3150,38 +4095,90 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
             Todas as despesas do mês
           </button>
         </div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <SectionTitle subtitle={subview === 'fatura' ? 'Só lançamentos no crédito deste mês' : 'Débito + crédito deste mês'}>
             {list.length} lançamento(s)
           </SectionTitle>
-          <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</span>
+          <div className="flex items-center gap-2">
+            {faturaStatus && <Badge color={faturaStatus.color} soft={faturaStatus.soft}>{faturaStatus.label}</Badge>}
+            <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</span>
+          </div>
         </div>
         {list.length === 0 ? (
           <EmptyState icon={CalendarIcon} title="Nada por aqui" description="Nenhum lançamento encontrado para este mês com esse filtro." />
         ) : (
-          <div className="space-y-1">
-            {list.map((t) => {
-              const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
-              const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
-              return (
-                <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
-                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                      {formatDate(t.date)} · {card ? card.bank : 'Débito'}
-                      {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
-                    </p>
+          <>
+            {/* Mobile: mesmo card com swipe (arraste pra esquerda) usado em Transações, revelando
+                editar/excluir por trás — antes essa aba só tinha a linha larga de desktop. */}
+            <div className="sm:hidden space-y-2">
+              {list.map((t) => {
+                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                return (
+                  <SwipeableRow
+                    key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}
+                    deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${t.description}"? Essa ação não pode ser desfeita.` }}
+                  >
+                    <div className="flex items-center gap-3 p-3">
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
+                            {t.description}
+                            {t.installmentGroupId && <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{t.installmentIndex}/{t.installmentCount}</span>}
+                          </p>
+                          <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
+                          <span className="shrink-0">{formatDate(t.date)}</span>
+                          <span className="shrink-0">·</span>
+                          <span className="truncate">{card ? card.bank : 'Débito'}</span>
+                          {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
+                        </div>
+                        {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
+                          <button onClick={() => setConfirmMarkPaid(t)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
+                            <Check size={12} /> Marcar como pago
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </SwipeableRow>
+                );
+              })}
+              <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>
+            </div>
+
+            {/* Desktop/tablet: linha única, como antes. */}
+            <div className="hidden sm:block space-y-1">
+              {list.map((t) => {
+                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                return (
+                  <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                        {formatDate(t.date)} · {card ? card.bank : 'Débito'}
+                        {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
+                      </p>
+                    </div>
+                    {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
+                    {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
+                      <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                    )}
+                    <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                    {onEditTransaction && (
+                      <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
+                    )}
+                    {onDeleteTransaction && (
+                      <button onClick={() => setConfirmDeleteRow(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir lançamento"><Trash2 size={14} color="var(--expense)" /></button>
+                    )}
                   </div>
-                  <StatusBadge status={t.status} type={t.type} />
-                  {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
-                    <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-1.5 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
-                  )}
-                  <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </Card>
       {confirmMarkPaid && (
@@ -3193,18 +4190,33 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
           onClose={() => setConfirmMarkPaid(null)}
         />
       )}
+      {confirmDeleteRow && (
+        <ConfirmModal
+          title="Excluir lançamento"
+          description={`Tem certeza que deseja excluir "${confirmDeleteRow.description}"? Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDeleteTransaction(confirmDeleteRow); setConfirmDeleteRow(null); }}
+          onClose={() => setConfirmDeleteRow(null)}
+        />
+      )}
+      {editingTx && (
+        <TransactionForm
+          initial={editingTx} accounts={accounts} cards={cards} benefits={benefits}
+          onSave={(f) => { onEditTransaction(f); setEditingTx(null); }}
+          onClose={() => setEditingTx(null)}
+          onDelete={(tx) => { onDeleteTransaction(tx); setEditingTx(null); }}
+        />
+      )}
     </div>
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, onAdd, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
-  const [confirmDeleteCard, setConfirmDeleteCard] = useState(null);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--bg)' }}>
+      <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
         <button
           onClick={() => onChangeView && onChangeView('cartoes')}
           className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -3222,58 +4234,35 @@ function CardsPage({ cards, transactions, accounts, recurring, onAdd, onDelete, 
       </div>
 
       {view === 'fatura' ? (
-        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} />
+        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} />
       ) : (
         <>
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>}>Seus cartões</SectionTitle>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
             {cards.map((c, i) => (
-              <div key={c.id} className="relative group">
-                <CreditCardVisual card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length]} />
-                <button onClick={() => setConfirmDeleteCard(c)} className="absolute top-4 right-4 p-1.5 rounded-lg bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Trash2 size={14} color="#fff" />
-                </button>
-              </div>
+              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
             ))}
           </div>
 
-          <SectionTitle subtitle="Alimentação e transporte" action={<Button size="sm" icon={Plus} onClick={() => setShowBenefitForm(true)}>Novo vale-benefícios</Button>}>
-            Vale-benefícios
-          </SectionTitle>
-          {benefits.length === 0 ? (
-            <Card><EmptyState icon={Utensils} title="Nenhum vale-benefícios cadastrado" description="Adicione seu cartão Flash (ou similar) para acompanhar alimentação e transporte separadamente." /></Card>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {benefits.map((b) => (
-                <BenefitCard key={b.id} benefit={b} onUpdate={onUpdateBenefit} onDelete={() => setConfirmDeleteBenefit(b)} />
-              ))}
-            </div>
+          {isVisible(settings, 'cartoes', 'beneficios') && (
+            <>
+              <SectionTitle subtitle="Alimentação e transporte" action={<Button size="sm" icon={Plus} onClick={() => setShowBenefitForm(true)}>Novo vale-benefícios</Button>}>
+                Vale-benefícios
+              </SectionTitle>
+              {benefits.length === 0 ? (
+                <Card><EmptyState icon={Utensils} title="Nenhum vale-benefícios cadastrado" description="Adicione seu cartão Flash (ou similar) para acompanhar alimentação e transporte separadamente." /></Card>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {benefits.map((b) => (
+                    <BenefitCard key={b.id} benefit={b} onUpdate={onUpdateBenefit} onDelete={() => setConfirmDeleteBenefit(b)} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           {showForm && <CardForm accounts={accounts} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
           {showBenefitForm && <BenefitForm onSave={(f) => { onAddBenefit(f); setShowBenefitForm(false); }} onClose={() => setShowBenefitForm(false)} />}
-          {confirmDeleteCard && (() => {
-            const pendingCount = transactions.filter((t) => t.cardId === confirmDeleteCard.id && t.status === 'Pendente').length;
-            if (pendingCount > 0) {
-              return (
-                <ConfirmModal
-                  title="Não é possível excluir"
-                  description={`O cartão "${confirmDeleteCard.bank}" ainda tem ${pendingCount} lançamento(s) com fatura em aberto (pendente). Pague a fatura ou edite/exclua esses lançamentos antes de excluir o cartão.`}
-                  confirmLabel="Entendi" variant="primary"
-                  onConfirm={() => setConfirmDeleteCard(null)}
-                  onClose={() => setConfirmDeleteCard(null)}
-                />
-              );
-            }
-            return (
-              <ConfirmModal
-                title="Excluir cartão"
-                description={`Tem certeza que deseja excluir o cartão "${confirmDeleteCard.bank}"? Essa ação não pode ser desfeita.`}
-                onConfirm={() => { onDelete(confirmDeleteCard); setConfirmDeleteCard(null); }}
-                onClose={() => setConfirmDeleteCard(null)}
-              />
-            );
-          })()}
           {confirmDeleteBenefit && (
             <ConfirmModal
               title="Excluir vale-benefícios"
@@ -3305,11 +4294,11 @@ function InvestmentForm({ initial, onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Categoria</FieldLabel>
-          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+          <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
             {INVESTMENT_CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Valor investido</FieldLabel>
             <CurrencyInput value={form.invested} onChange={(v) => setForm({ ...form, invested: v, currentValue: currentTouched ? form.currentValue : v })} />
@@ -3331,7 +4320,7 @@ function InvestmentForm({ initial, onSave, onClose }) {
   );
 }
 
-function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
+function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -3346,15 +4335,21 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
   investments.forEach((i) => { byCategory[i.category] = (byCategory[i.category] || 0) + i.currentValue; });
   const allocation = Object.entries(byCategory).map(([name, value]) => ({ name, value, color: INVESTMENT_CATEGORIES[name] || '#A8A398' }));
 
+  const kpiCards = [
+    { key: 'kpiInvestido', title: 'Valor investido', value: formatBRL(totalInvested), description: 'Total aportado', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)' },
+    { key: 'kpiAtual', title: 'Valor atual', value: formatBRL(totalCurrent), description: 'Valor de mercado hoje', icon: PiggyBank, color: 'var(--invest)', soft: 'var(--invest-soft)' },
+    { key: 'kpiRentabilidade', title: 'Rentabilidade', value: `${gain >= 0 ? '+' : ''}${gainPercent.toFixed(1)}%`, description: formatBRL(gain), icon: gain >= 0 ? TrendingUp : TrendingDown, color: gain >= 0 ? 'var(--income)' : 'var(--expense)', soft: gain >= 0 ? 'var(--income-soft)' : 'var(--expense-soft)' },
+  ].filter((c) => isVisible(settings, 'investimentos', c.key));
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard title="Valor investido" value={formatBRL(totalInvested)} description="Total aportado" icon={Wallet} color="var(--primary)" soft="var(--primary-soft)" />
-        <StatCard title="Valor atual" value={formatBRL(totalCurrent)} description="Valor de mercado hoje" icon={PiggyBank} color="var(--invest)" soft="var(--invest-soft)" />
-        <StatCard title="Rentabilidade" value={`${gain >= 0 ? '+' : ''}${gainPercent.toFixed(1)}%`} description={formatBRL(gain)} icon={gain >= 0 ? TrendingUp : TrendingDown} color={gain >= 0 ? 'var(--income)' : 'var(--expense)'} soft={gain >= 0 ? 'var(--income-soft)' : 'var(--expense-soft)'} />
-      </div>
+      {kpiCards.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {kpiCards.map((c) => <StatCard key={c.key} {...c} />)}
+        </div>
+      )}
 
-      {investments.length > 0 && (
+      {investments.length > 0 && isVisible(settings, 'investimentos', 'allocationChart') && (
         <Card className="max-w-xs">
           <SectionTitle>Distribuição por categoria</SectionTitle>
           <div style={{ width: '100%', height: 180 }}>
@@ -3362,7 +4357,7 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
               <PieChart>
                 <Pie
                   data={allocation} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}
-                  onMouseEnter={(_, i) => setActiveAllocation(i)} onMouseLeave={() => setActiveAllocation(null)}
+                  onClick={(_, i) => setActiveAllocation((cur) => (cur === i ? null : i))}
                 >
                   {allocation.map((a, i) => (
                     <Cell key={i} fill={a.color} stroke="none" opacity={activeAllocation == null || activeAllocation === i ? 1 : 0.35} style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }} />
@@ -3375,8 +4370,8 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
             {allocation.map((a, i) => (
               <div
                 key={i}
-                onMouseEnter={() => setActiveAllocation(i)} onMouseLeave={() => setActiveAllocation(null)}
-                className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 transition-colors"
+                onClick={() => setActiveAllocation((cur) => (cur === i ? null : i))}
+                className="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer transition-colors"
                 style={{ backgroundColor: activeAllocation === i ? a.color + '26' : 'transparent' }}
               >
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
@@ -3417,8 +4412,8 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
                       <td className="py-3 pr-3 tabular-nums font-medium" style={{ color: g >= 0 ? 'var(--income)' : 'var(--expense)' }}>{g >= 0 ? '+' : ''}{gp.toFixed(1)}%</td>
                       <td className="py-3 pr-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => setEditing(inv)} className="p-1.5 rounded-lg hover:bg-black/5"><Pencil size={13} color="var(--text-soft)" /></button>
-                          <button onClick={() => setConfirmDelete(inv)} className="p-1.5 rounded-lg hover:bg-black/5"><Trash2 size={13} color="var(--expense)" /></button>
+                          <button onClick={() => setEditing(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
+                          <button onClick={() => setConfirmDelete(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
                         </div>
                       </td>
                     </tr>
@@ -3448,7 +4443,7 @@ function InvestmentsPage({ investments, onAdd, onEdit, onDelete }) {
    PÁGINA: METAS
    ============================================================ */
 
-function GoalsPage({ goals, onAdd, onAddFunds, onDelete }) {
+function GoalsPage({ goals, onAdd, onAddFunds, onDelete, onCompleted }) {
   const [showForm, setShowForm] = useState(false);
   return (
     <div className="space-y-6">
@@ -3457,7 +4452,7 @@ function GoalsPage({ goals, onAdd, onAddFunds, onDelete }) {
         <Card><EmptyState icon={Target} title="Nenhuma meta criada" description="Crie metas para acompanhar seus objetivos financeiros." /></Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onDelete={onDelete} />)}
+          {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onDelete={onDelete} onCompleted={onCompleted} />)}
         </div>
       )}
       {showForm && <GoalForm onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
@@ -3469,9 +4464,12 @@ function GoalsPage({ goals, onAdd, onAddFunds, onDelete }) {
    PÁGINA: DESPESAS RECORRENTES
    ============================================================ */
 
-function RecurringForm({ accounts = [], cards = [], onSave, onClose }) {
-  const [form, setForm] = useState({ name: '', category: 'Lazer', value: 0, renewalDay: 1, cardId: null, accountId: accounts[0]?.id || '' });
+function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, onLaunchNow, onDelete }) {
+  const [form, setForm] = useState(() => initial
+    ? { ...initial }
+    : { name: '', category: 'Lazer', value: 0, renewalDay: 1, cardId: null, accountId: accounts[0]?.id || '' });
   const [error, setError] = useState('');
+  const isEditing = !!initial;
 
   function selectPaymentSource(v) {
     if (v.startsWith('card:')) setForm({ ...form, cardId: v.slice(5) });
@@ -3479,22 +4477,22 @@ function RecurringForm({ accounts = [], cards = [], onSave, onClose }) {
   }
 
   return (
-    <Modal title="Nova despesa recorrente" onClose={onClose}>
+    <Modal title={isEditing ? 'Editar despesa recorrente' : 'Nova despesa recorrente'} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <FieldLabel error={error}>Nome</FieldLabel>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Academia" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
               {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <FieldLabel>Dia da renovação</FieldLabel>
-            <input type="number" min={1} max={31} value={form.renewalDay} onChange={(e) => setForm({ ...form, renewalDay: Number(e.target.value) })} className={inputClass} style={inputStyle} />
+            <input type="number" inputMode="numeric" min={1} max={31} value={form.renewalDay} onChange={(e) => setForm({ ...form, renewalDay: Number(e.target.value) })} className={inputClass} style={inputStyle} />
           </div>
         </div>
         <div>
@@ -3503,7 +4501,7 @@ function RecurringForm({ accounts = [], cards = [], onSave, onClose }) {
         </div>
         <div>
           <FieldLabel>Débito ou crédito</FieldLabel>
-          <select value={form.cardId ? `card:${form.cardId}` : `account:${form.accountId}`} onChange={(e) => selectPaymentSource(e.target.value)} className={inputClass} style={inputStyle}>
+          <Select value={form.cardId ? `card:${form.cardId}` : `account:${form.accountId}`} onChange={(e) => selectPaymentSource(e.target.value)} className={inputClass} style={inputStyle}>
             {accounts.length > 0 && (
               <optgroup label="Débito (sai direto da conta)">
                 {accounts.map((a) => <option key={a.id} value={`account:${a.id}`}>{a.bank} ({a.type})</option>)}
@@ -3514,120 +4512,189 @@ function RecurringForm({ accounts = [], cards = [], onSave, onClose }) {
                 {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.bank} — {c.brand}</option>)}
               </optgroup>
             )}
-          </select>
+          </Select>
           <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>
-            {form.cardId ? 'Ao lançar, entra na fatura desse cartão.' : 'Ao lançar, desconta da conta na hora.'}
+            {form.cardId ? 'Entra automaticamente nas próximas faturas desse cartão.' : 'Entra automaticamente nos próximos meses como um lançamento pendente na conta.'}
           </p>
         </div>
-        <div className="flex justify-end gap-3 pt-2">
+        {isEditing && onLaunchNow && (
+          <div className="rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+            <div className="min-w-0">
+              <p className="text-xs font-medium" style={{ color: 'var(--text)' }}>Lançamento manual de hoje</p>
+              <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Útil se algum mês ficou de fora da geração automática.</p>
+            </div>
+            <button type="button" onClick={() => onLaunchNow(form)} className="text-xs font-medium shrink-0 px-2.5 py-1.5 rounded-lg" style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}>
+              Lançar agora
+            </button>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>Adicionar</Button>
+          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
         </div>
       </div>
     </Modal>
   );
 }
 
-function RecurringExpensesPage({ recurring, accounts, cards, onAdd, onDelete, onLaunchNow }) {
+function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, onEdit, onDelete, onLaunchNow }) {
   const [showForm, setShowForm] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmLaunch, setConfirmLaunch] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
   const [activeBarIndex, setActiveBarIndex] = useState(null);
   const total = recurring.reduce((s, r) => s + r.value, 0);
   const byCategory = {};
   recurring.forEach((r) => { byCategory[r.category] = (byCategory[r.category] || 0) + r.value; });
-  const chartData = Object.entries(byCategory).map(([name, value]) => ({ name, value, color: (CATEGORIES[name] || CATEGORIES['Outros']).color }));
+  const chartData = Object.entries(byCategory)
+    .map(([name, value]) => ({ name, value, color: (CATEGORIES[name] || CATEGORIES['Outros']).color }))
+    .sort((a, b) => b.value - a.value);
+  const chartTotal = chartData.reduce((s, c) => s + c.value, 0);
+  const showChart = isVisible(settings, 'recorrentes', 'categoryChart');
+
+  const kpiCards = [
+    { key: 'kpiTotalMensal', title: 'Total recorrente mensal', value: formatBRL(total), description: `${recurring.length} assinaturas e despesas fixas`, icon: RefreshCw, color: 'var(--primary)', soft: 'var(--primary-soft)' },
+    { key: 'kpiTotalAnual', title: 'Total anual estimado', value: formatBRL(total * 12), description: 'Projeção com base no valor atual', icon: CalendarIcon, color: 'var(--invest)', soft: 'var(--invest-soft)' },
+  ].filter((c) => isVisible(settings, 'recorrentes', c.key));
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <StatCard title="Total recorrente mensal" value={formatBRL(total)} description={`${recurring.length} assinaturas e despesas fixas`} icon={RefreshCw} color="var(--primary)" soft="var(--primary-soft)" />
-        <StatCard title="Total anual estimado" value={formatBRL(total * 12)} description="Projeção com base no valor atual" icon={CalendarIcon} color="var(--invest)" soft="var(--invest-soft)" />
-      </div>
+      {kpiCards.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {kpiCards.map((c) => <StatCard key={c.key} {...c} />)}
+        </div>
+      )}
       <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>
-        Esta lista é só um controle de assinaturas — ela não entra sozinha nas suas despesas. Use "Lançar agora" para registrar o mês como um lançamento de verdade.
+        Cada despesa recorrente já entra sozinha como lançamento pendente nos próximos meses — não precisa lançar na mão todo mês. Toque numa despesa pra editar ou lançar manualmente um mês específico.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <Card className="lg:col-span-2">
-          <SectionTitle subtitle="onde você mais gasta de forma fixa">Por categoria</SectionTitle>
-          {/* Tooltip removido de propósito (cobria as barras num gráfico já pequeno) — passar o
-              mouse ou tocar numa barra só destaca ela e esmaece as outras. */}
-          <div style={{ width: '100%', height: 200 }}>
-            <ResponsiveContainer>
-              <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 16 }} onMouseLeave={() => setActiveBarIndex(null)}>
-                <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${v}`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} width={110} />
-                <Bar dataKey="value" radius={[0, 6, 6, 0]} label={{ position: 'right', fontSize: 11, fill: 'var(--text-soft)', formatter: (v) => formatBRL(v) }}>
-                  {chartData.map((entry, i) => (
-                    <Cell
-                      key={i} fill={entry.color}
-                      opacity={activeBarIndex == null || activeBarIndex === i ? 1 : 0.35}
-                      onMouseEnter={() => setActiveBarIndex(i)}
-                      style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-        <Card className="lg:col-span-3">
+        {showChart && (
+          <Card className="lg:col-span-2">
+            <SectionTitle subtitle="onde você mais gasta de forma fixa">Por categoria</SectionTitle>
+            {/* Sem rótulos no eixo — com muitas categorias, texto espremido do lado das barras
+                fica ilegível (cortado). A leitura fica por conta da legenda com cores abaixo,
+                igual ao gráfico de pizza. */}
+            <div style={{ width: '100%', height: Math.max(96, chartData.length * 38) }}>
+              <ResponsiveContainer>
+                <BarChart data={chartData} layout="vertical" margin={{ left: 4, right: 4, top: 4, bottom: 4 }} barCategoryGap={14} onMouseLeave={() => setActiveBarIndex(null)}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" hide />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={22}
+                    onClick={(_, i) => setActiveBarIndex((cur) => (cur === i ? null : i))}
+                  >
+                    {chartData.map((entry, i) => (
+                      <Cell
+                        key={i} fill={entry.color}
+                        opacity={activeBarIndex == null || activeBarIndex === i ? 1 : 0.35}
+                        style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="space-y-1 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+              {chartData.map((entry, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveBarIndex((cur) => (cur === i ? null : i))}
+                  className="w-full flex items-center gap-2 text-xs rounded-lg px-1.5 py-1.5 transition-colors"
+                  style={{ backgroundColor: activeBarIndex === i ? entry.color + '1f' : 'transparent' }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+                  <span className="flex-1 truncate text-left" style={{ color: 'var(--text)' }}>{entry.name}</span>
+                  <span className="tabular-nums shrink-0" style={{ color: 'var(--text-soft)' }}>{chartTotal > 0 ? ((entry.value / chartTotal) * 100).toFixed(0) : 0}%</span>
+                  <span className="tabular-nums font-medium shrink-0 w-[76px] text-right" style={{ color: 'var(--text)' }}>{formatBRL(entry.value)}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+        )}
+        <Card className={showChart ? 'lg:col-span-3' : 'lg:col-span-5'}>
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Nova despesa</Button>}>Assinaturas e despesas fixas</SectionTitle>
-          <div className="space-y-2">
-            {recurring.map((r) => {
-              const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
-              const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
-              const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
-              const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
-              return (
-                <div key={r.id} className="p-3 rounded-xl hover:bg-black/[0.02]">
-                  <div className="flex items-center gap-3">
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
-                        <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
-                        {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 justify-end mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                    <button
-                      onClick={() => setConfirmLaunch(r)}
-                      disabled={!r.accountId && !r.cardId && !accounts[0]}
-                      className="text-xs font-medium shrink-0 px-2.5 py-1.5 rounded-lg"
-                      style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
+          {recurring.length === 0 ? (
+            <EmptyState icon={RefreshCw} title="Nenhuma despesa recorrente" description="Adicione assinaturas e contas fixas para acompanhar o total mensal." />
+          ) : (
+            <>
+              {/* Mobile: mesmo card com swipe (arraste pra esquerda) usado em Transações,
+                  revelando editar/excluir por trás. */}
+              <div className="sm:hidden space-y-2">
+                {recurring.map((r) => {
+                  const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
+                  const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
+                  const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
+                  const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
+                  return (
+                    <SwipeableRow
+                      key={r.id} onEdit={() => setEditingItem(r)} onDelete={() => onDelete(r)}
+                      deleteConfirm={{ title: 'Excluir despesa recorrente', description: `Tem certeza que deseja excluir "${r.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.` }}
                     >
-                      Lançar agora
-                    </button>
-                    <button onClick={() => setConfirmDelete(r)} className="p-1.5 rounded-lg hover:bg-black/5 shrink-0"><Trash2 size={14} color="var(--text-soft)" /></button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      <div className="flex items-start gap-3 p-3">
+                        <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
+                            <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                          </div>
+                          <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
+                            <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                            {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </SwipeableRow>
+                  );
+                })}
+                <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste uma despesa pra esquerda para editar ou excluir</p>
+              </div>
+
+              {/* Desktop/tablet: linha única com ícones de ação. */}
+              <div className="hidden sm:block">
+                {recurring.map((r, i) => {
+                  const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
+                  const card = r.cardId ? cards.find((c) => c.id === r.cardId) : null;
+                  const account = r.accountId ? accounts.find((a) => a.id === r.accountId) : null;
+                  const sourceLabel = card ? `Crédito · ${card.bank}` : account ? `Débito · ${account.bank}` : null;
+                  return (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-3 py-3 px-1 hover:bg-black/[0.02] rounded-lg"
+                      style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
+                    >
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
+                        <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
+                          <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                          {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
+                        </div>
+                      </div>
+                      <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                      <button onClick={() => setEditingItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                      <button onClick={() => setConfirmDeleteItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </Card>
       </div>
       {showForm && <RecurringForm accounts={accounts} cards={cards} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
-      {confirmDelete && (
-        <ConfirmModal
-          title="Excluir despesa recorrente"
-          description={`Tem certeza que deseja excluir "${confirmDelete.name}" da lista? Essa ação não pode ser desfeita.`}
-          onConfirm={() => { onDelete(confirmDelete); setConfirmDelete(null); }}
-          onClose={() => setConfirmDelete(null)}
+      {editingItem && (
+        <RecurringForm
+          accounts={accounts} cards={cards} initial={editingItem}
+          onSave={(f) => { onEdit(f); setEditingItem(null); }}
+          onClose={() => setEditingItem(null)}
+          onLaunchNow={(f) => { onLaunchNow(f); setEditingItem(null); }}
         />
       )}
-      {confirmLaunch && (
+      {confirmDeleteItem && (
         <ConfirmModal
-          title="Lançar agora"
-          description={`Isso cria um lançamento de ${formatBRL(confirmLaunch.value)} referente a "${confirmLaunch.name}" hoje. Confirma?`}
-          variant="primary" confirmLabel="Lançar"
-          onConfirm={() => { onLaunchNow(confirmLaunch); setConfirmLaunch(null); }}
-          onClose={() => setConfirmLaunch(null)}
+          title="Excluir despesa recorrente"
+          description={`Tem certeza que deseja excluir "${confirmDeleteItem.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onDelete(confirmDeleteItem); setConfirmDeleteItem(null); }}
+          onClose={() => setConfirmDeleteItem(null)}
         />
       )}
     </div>
@@ -3638,7 +4705,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, onAdd, onDelete, on
    PÁGINA: RELATÓRIOS
    ============================================================ */
 
-function ReportsPage({ monthlyHistory, categoryComparison }) {
+function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
   const barData = monthlyHistory.map((m) => ({ month: m.month, Receitas: m.receitas, Despesas: m.despesas }));
   function exportSummary() {
     const rows = monthlyHistory.map((m) => ({ Mês: m.month, Receitas: m.receitas, Despesas: m.despesas, Saldo: m.receitas - m.despesas, Patrimônio: m.patrimonio }));
@@ -3657,10 +4724,10 @@ function ReportsPage({ monthlyHistory, categoryComparison }) {
         <SectionTitle>Receitas vs. Despesas (12 meses)</SectionTitle>
         <div style={{ width: '100%', height: 280 }}>
           <ResponsiveContainer>
-            <BarChart data={barData}>
+            <BarChart data={barData} margin={{ left: -20, right: 4, top: 4, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} width={36} />
               <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)', fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="Receitas" fill="#5A8F5A" radius={[6, 6, 0, 0]} />
@@ -3669,10 +4736,12 @@ function ReportsPage({ monthlyHistory, categoryComparison }) {
           </ResponsiveContainer>
         </div>
       </Card>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <CategoryDonut data={categoryComparison.current} title="Gastos por categoria" subtitle="mês atual" />
-        <CategoryDonut data={categoryComparison.previous} title="Gastos por categoria" subtitle="mês anterior" />
-      </div>
+      {isVisible(settings, 'relatorios', 'categoryComparison') && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <CategoryDonut data={categoryComparison.current} title="Gastos por categoria" subtitle="mês atual" />
+          <CategoryDonut data={categoryComparison.previous} title="Gastos por categoria" subtitle="mês anterior" />
+        </div>
+      )}
     </div>
   );
 }
@@ -3683,16 +4752,64 @@ function ReportsPage({ monthlyHistory, categoryComparison }) {
 
 function ToggleSwitch({ checked, onChange }) {
   return (
-    <button onClick={() => onChange(!checked)} className="w-11 h-6 rounded-full p-0.5 transition-colors focus-ring" style={{ backgroundColor: checked ? 'var(--primary)' : 'var(--border)' }}>
+    <button onClick={() => onChange(!checked)} className="w-11 h-6 rounded-full p-0.5 transition-colors focus-ring shrink-0" style={{ backgroundColor: checked ? 'var(--primary)' : 'var(--border)' }}>
       <div className="w-5 h-5 rounded-full bg-white shadow-sm transition-transform" style={{ transform: checked ? 'translateX(20px)' : 'translateX(0)' }} />
     </button>
   );
 }
 
-function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox }) {
+function VisibilitySettingsSection({ settings, onChangeSettings }) {
+  const [activeTab, setActiveTab] = useState(VISIBILITY_SCHEMA[0]?.key);
+  function toggleItem(pageKey, itemKey, value) {
+    const visibility = { ...(settings.visibility || {}) };
+    visibility[pageKey] = { ...(visibility[pageKey] || {}), [itemKey]: value };
+    onChangeSettings({ ...settings, visibility });
+  }
+  const activePage = VISIBILITY_SCHEMA.find((p) => p.key === activeTab) || VISIBILITY_SCHEMA[0];
+  return (
+    <Card>
+      <SectionTitle subtitle='Escolha quais cards, gráficos e blocos aparecem em cada página. Navegação, listas principais e formulários são sempre exibidos.'>
+        Personalização da interface
+      </SectionTitle>
+      {/* Abas em vez de accordions empilhados — com 7 páginas, uma lista vertical de accordions
+          significava rolar bastante pra alternar de categoria. Uma barra de abas (com quebra de
+          linha) deixa qualquer categoria a um toque, sem rolagem extra. */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {VISIBILITY_SCHEMA.map((page) => (
+          <button
+            key={page.key}
+            onClick={() => setActiveTab(page.key)}
+            className="text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+            style={activeTab === page.key ? { backgroundColor: 'var(--primary)', color: '#fff' } : { backgroundColor: 'var(--bg)', color: 'var(--text-soft)' }}
+          >
+            {page.label}
+          </button>
+        ))}
+      </div>
+      {activePage && (
+        <div className="space-y-3.5">
+          <div className="flex items-center justify-between gap-3 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
+            <p className="text-sm min-w-0 flex-1" style={{ color: 'var(--text-soft)' }}>{activePage.essentialLabel}</p>
+            <Badge color="var(--text-soft)" soft="var(--bg)">Obrigatório</Badge>
+          </div>
+          {activePage.items.map((item) => (
+            <div key={item.key} className="flex items-center justify-between gap-3">
+              <p className="text-sm min-w-0 flex-1" style={{ color: 'var(--text)' }}>{item.label}</p>
+              <ToggleSwitch checked={isVisible(settings, activePage.key, item.key)} onChange={(v) => toggleItem(activePage.key, item.key, v)} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox, onExportBackup, onImportBackup }) {
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState(null);
+  const importInputRef = useRef(null);
   const dropboxReady = isDropboxConfigured();
   return (
     <div className="space-y-6 max-w-2xl">
@@ -3732,6 +4849,19 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
           </div>
         </div>
       </Card>
+
+      <Card>
+        <SectionTitle>Navegação</SectionTitle>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Botão flutuante de novo lançamento</p>
+            <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Atalho fixo no canto da tela pra criar um lançamento de qualquer aba, sem precisar abrir o menu. Some em telas grandes, onde o menu lateral já fica sempre visível.</p>
+          </div>
+          <ToggleSwitch checked={settings.fabEnabled !== false} onChange={(v) => onChangeSettings({ ...settings, fabEnabled: v })} />
+        </div>
+      </Card>
+
+      <VisibilitySettingsSection settings={settings} onChangeSettings={onChangeSettings} />
 
       <Card>
         <SectionTitle>Metas gerais</SectionTitle>
@@ -3803,12 +4933,26 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
 
       <Card>
         <SectionTitle>Dados</SectionTitle>
-        <p className="text-sm mb-4" style={{ color: 'var(--text-soft)' }}>Seus dados ficam salvos automaticamente neste aplicativo.</p>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-soft)' }}>Seus dados ficam salvos automaticamente neste aplicativo. O backup em arquivo inclui tudo, inclusive suas configurações.</p>
         <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" icon={Download} onClick={onExportBackup}>Baixar backup (.json)</Button>
+          <Button variant="secondary" icon={Upload} onClick={() => importInputRef.current?.click()}>Importar backup (.json)</Button>
+          <input ref={importInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setPendingImportFile(f); e.target.value = ''; }} />
+        </div>
+        <div className="flex flex-wrap gap-3 mt-3">
           <Button variant="secondary" onClick={() => setShowConfirmReset(true)}>Restaurar dados de exemplo</Button>
           <Button variant="secondary" onClick={() => setShowConfirmClear(true)}>Limpar dados</Button>
         </div>
       </Card>
+
+      {pendingImportFile && (
+        <ConfirmModal
+          title="Importar backup"
+          description={`Isso substituirá todos os dados e configurações deste navegador pelo conteúdo de "${pendingImportFile.name}". Essa ação não pode ser desfeita.`}
+          onConfirm={() => { onImportBackup(pendingImportFile); setPendingImportFile(null); }}
+          onClose={() => setPendingImportFile(null)}
+        />
+      )}
 
       {showConfirmReset && (
         <ConfirmModal
@@ -3853,7 +4997,7 @@ export default function App() {
   const [userName, setUserName] = useState('Thiago Coura');
   const [settings, setSettings] = useState(() => {
     // Lê o tema direto do localStorage de forma síncrona, pra não piscar claro→escuro na abertura.
-    const defaults = { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default' };
+    const defaults = { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default', fabEnabled: true };
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
@@ -3873,6 +5017,21 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [celebration, setCelebration] = useState(null); // { id, origin: {x,y} | null } — explosão de emojis ao concluir uma meta
+  function celebrateGoalCompletion(origin) {
+    setCelebration({ id: Date.now(), origin });
+  }
+
+  // Encolhe o botão + (FAB) enquanto o conteúdo principal está sendo rolado, e devolve o
+  // tamanho normal depois de 0,75s parado — cada novo scroll reinicia essa contagem.
+  const [fabScrolling, setFabScrolling] = useState(false);
+  const fabScrollTimeoutRef = useRef(null);
+  function handleContentScroll() {
+    setFabScrolling(true);
+    if (fabScrollTimeoutRef.current) clearTimeout(fabScrollTimeoutRef.current);
+    fabScrollTimeoutRef.current = setTimeout(() => setFabScrolling(false), 750);
+  }
+  useEffect(() => () => { if (fabScrollTimeoutRef.current) clearTimeout(fabScrollTimeoutRef.current); }, []);
 
   const [dropboxConnected, setDropboxConnected] = useState(isDropboxConnected());
   const [dropboxBusy, setDropboxBusy] = useState(false);
@@ -3894,7 +5053,7 @@ export default function App() {
     setBenefits(loaded.benefits || initialBenefits);
     setInvestments(loaded.investments || initialInvestments);
     setUserName(loaded.userName || 'Thiago Coura');
-    setSettings(loaded.settings || { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default' });
+    setSettings(loaded.settings || { notifyDueDates: true, notifyGoals: true, notifyInsights: true, monthlySavingsTarget: 2500, theme: 'light', colorTheme: 'default', fabEnabled: true });
     setLastModified(loaded.lastModified || null);
   }
 
@@ -3978,6 +5137,26 @@ export default function App() {
     function addToastSafe(message, type = 'success') { setToasts((prev) => [...prev, { id: uid(), message, type }]); }
   }, []);
 
+  // Ao terminar de carregar os dados (localStorage, backup do Dropbox ou dados de exemplo),
+  // garante que toda despesa recorrente tenha as próximas ocorrências já lançadas — cobre tanto
+  // dados salvos antes dessa função existir quanto o caso de abrir o app depois de um tempo
+  // parado (o "buffer" de meses gerados precisa ser reposto). generateRecurringOccurrences já
+  // evita duplicar quem já tem lançamento naquele mês, então rodar de novo é sempre seguro.
+  useEffect(() => {
+    if (isLoading) return;
+    let nextTx = transactions;
+    let changed = false;
+    recurring.forEach((item) => {
+      const fresh = generateRecurringOccurrences(item, cards, nextTx);
+      if (fresh.length > 0) { nextTx = [...nextTx, ...fresh]; changed = true; }
+    });
+    if (changed) {
+      setTransactions(nextTx);
+      persist({ transactions: nextTx });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
+
   // Reconfere periodicamente (e sempre que a aba volta a ficar em foco) se apareceu um backup
   // mais novo no Dropbox — cobre o caso de ter mexido em outro aparelho enquanto este ficou aberto.
   useEffect(() => {
@@ -3991,7 +5170,7 @@ export default function App() {
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     const themeInfo = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.default;
-    if (meta) meta.setAttribute('content', settings.theme === 'dark' ? '#1C1B18' : themeInfo.light);
+    if (meta) meta.setAttribute('content', settings.theme === 'dark' ? '#0D1117' : themeInfo.light);
   }, [settings.theme, settings.colorTheme]);
 
   function addToast(message, type = 'success') {
@@ -4060,6 +5239,32 @@ export default function App() {
     } finally {
       setDropboxBusy(false);
     }
+  }
+  // Backup local em arquivo .json — inclui tudo, inclusive as configurações (aparência, metas
+  // gerais, notificações e a personalização da interface), independente do Dropbox estar conectado.
+  function exportBackupFile() {
+    const payload = { transactions, accounts, cards, goals, caixinhas, recurring, benefits, investments, userName, settings, lastModified: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `cerne-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast('Backup baixado.');
+  }
+  function importBackupFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        applyLoadedData(data);
+        saveAppData(data);
+        addToast('Backup importado com sucesso.');
+      } catch (err) {
+        addToast('Não foi possível ler esse arquivo — confira se é um backup exportado pelo Cerne.', 'error');
+      }
+    };
+    reader.readAsText(file);
   }
 
   function goTo(page) { setActivePage(page); window.scrollTo({ top: 0 }); }
@@ -4200,6 +5405,11 @@ export default function App() {
     setCards(updated); persist({ cards: updated });
     addToast('Cartão adicionado.');
   }
+  function editCard(form) {
+    const updated = cards.map((c) => (c.id === form.id ? form : c));
+    setCards(updated); persist({ cards: updated });
+    addToast('Cartão atualizado.');
+  }
   function deleteCard(card) {
     const updated = cards.filter((c) => c.id !== card.id);
     setCards(updated); persist({ cards: updated });
@@ -4307,20 +5517,50 @@ export default function App() {
 
   /* ---- despesas recorrentes ---- */
   function addRecurring(form) {
-    const updated = [...recurring, { ...form, id: uid() }];
-    setRecurring(updated); persist({ recurring: updated });
-    addToast('Despesa recorrente adicionada.');
+    const item = { ...form, id: uid() };
+    const updatedRecurring = [...recurring, item];
+    const newOccurrences = generateRecurringOccurrences(item, cards, transactions);
+    const updatedTransactions = newOccurrences.length > 0 ? [...transactions, ...newOccurrences] : transactions;
+    setRecurring(updatedRecurring);
+    if (newOccurrences.length > 0) setTransactions(updatedTransactions);
+    persist({ recurring: updatedRecurring, transactions: updatedTransactions });
+    addToast(newOccurrences.length > 0 ? `Despesa recorrente adicionada e lançada nos próximos ${newOccurrences.length} meses.` : 'Despesa recorrente adicionada.');
+  }
+  // Atualiza os dados da despesa recorrente e regenera as ocorrências futuras (ainda não
+  // vencidas) com os novos valores — o que já venceu/foi lançado no passado não muda, fica
+  // como registro histórico do que realmente foi cobrado naquele mês.
+  function editRecurring(form) {
+    const updatedRecurring = recurring.map((r) => (r.id === form.id ? form : r));
+    const todayStr = ymd(new Date());
+    const withoutFutureOccurrences = transactions.filter((t) => !(t.recurringId === form.id && t.date >= todayStr));
+    const newOccurrences = generateRecurringOccurrences(form, cards, withoutFutureOccurrences);
+    const updatedTransactions = [...withoutFutureOccurrences, ...newOccurrences];
+    setRecurring(updatedRecurring); setTransactions(updatedTransactions);
+    persist({ recurring: updatedRecurring, transactions: updatedTransactions });
+    addToast('Despesa recorrente atualizada.');
   }
   function deleteRecurring(r) {
-    const updated = recurring.filter((x) => x.id !== r.id);
-    setRecurring(updated); persist({ recurring: updated });
-    addToast('Despesa recorrente removida.');
+    const updatedRecurring = recurring.filter((x) => x.id !== r.id);
+    const todayStr = ymd(new Date());
+    // Remove só as ocorrências futuras geradas automaticamente — o que já venceu fica no
+    // histórico, mesmo depois de descadastrar a despesa recorrente.
+    const updatedTransactions = transactions.filter((t) => !(t.recurringId === r.id && t.date >= todayStr));
+    setRecurring(updatedRecurring); setTransactions(updatedTransactions);
+    persist({ recurring: updatedRecurring, transactions: updatedTransactions });
+    addToast('Despesa recorrente removida — os lançamentos futuros dela também foram removidos.');
   }
-  // Cria um lançamento real de hoje a partir de uma despesa recorrente — elas não entram
-  // sozinhas nos totais, isso é o que efetivamente conta a despesa no seu saldo/relatórios.
+  // Cria um lançamento real de hoje a partir de uma despesa recorrente — usada pra backfill
+  // manual (ex: mês que ficou de fora do lote automático). Não entra sozinha nos
+  // totais/relatórios, isso é o que efetivamente conta a despesa no seu saldo/relatórios.
   // Usa o cartão ou a conta configurados no cadastro da despesa recorrente; itens antigos sem
   // nenhum dos dois caem na primeira conta, pra não quebrar dados já existentes.
   function addRecurringAsTransaction(item) {
+    const today = new Date();
+    const alreadyExists = transactions.some((t) => t.type === 'despesa' && t.description === item.name && isSameMonth(t.date, today.getFullYear(), today.getMonth()));
+    if (alreadyExists) {
+      addToast('Esse mês já tem um lançamento dessa despesa recorrente.', 'error');
+      return;
+    }
     const card = item.cardId ? cards.find((c) => c.id === item.cardId) : null;
     const fallbackAccount = item.accountId || accounts[0]?.id || null;
     addTransaction({
@@ -4330,6 +5570,7 @@ export default function App() {
       paymentMethod: card ? 'Cartão de crédito' : 'Não informado',
       date: new Date().toISOString().slice(0, 10),
       status: card ? 'Pendente' : 'Pago',
+      recurringId: item.id,
     });
   }
 
@@ -4372,6 +5613,17 @@ export default function App() {
   const colorThemeClass = settings.colorTheme && settings.colorTheme !== 'default' ? ` theme-${settings.colorTheme}` : '';
   const rootClassSuffix = `${colorThemeClass}${settings.theme === 'dark' ? ' dark' : ''}`;
 
+  // O menu do <Select> (e outros portais) é renderizado fora da árvore normal pra nunca
+  // ficar cortado por um card/modal com "overflow: hidden/auto" no caminho. Pra isso, ele
+  // precisa ser anexado fora do .cerne-root (que tem overflow-hidden) — mas as variáveis de
+  // cor do tema (--bg, --card, --border, --text-soft, etc.) só existem dentro do
+  // .cerne-root. Replicando as mesmas classes no <body>, essas variáveis (que são herdadas)
+  // ficam disponíveis em qualquer portal anexado em document.body, no tema certo.
+  useEffect(() => {
+    document.body.className = `cerne-root${rootClassSuffix}`;
+    return () => { document.body.className = ''; };
+  }, [rootClassSuffix]);
+
   const investmentsTotal = useMemo(() => investments.reduce((s, i) => s + i.currentValue, 0), [investments]);
   const realMonthlyHistory = useMemo(
     () => computeMonthlyHistory(transactions, accounts, investmentsTotal),
@@ -4398,19 +5650,32 @@ export default function App() {
   }, [search, transactions]);
 
   // Resumo dos valores encontrados na busca — soma pelo total filtrado, não só pelos
-  // 10 primeiros resultados exibidos na lista.
+  // 10 primeiros resultados exibidos na lista. Considera só o que já venceu até hoje: uma
+  // compra parcelada (ex: "TV" em 10x) já gera as 10 parcelas como lançamentos futuros no
+  // array, então somar tudo daria o valor total da compra, não o que de fato já foi gasto
+  // até agora. As parcelas futuras aparecem à parte, não somadas ao total.
   const searchTotals = useMemo(() => {
     if (!filteredForSearch || filteredForSearch.length === 0) return null;
-    const despesas = filteredForSearch.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
-    const receitas = filteredForSearch.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
-    return [
+    const todayStr = ymd(new Date());
+    const realized = filteredForSearch.filter((t) => t.date <= todayStr);
+    const future = filteredForSearch.filter((t) => t.date > todayStr);
+    const despesas = realized.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
+    const receitas = realized.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
+    const futureTotal = future.reduce((s, t) => s + t.amount, 0);
+    const parts = [
       despesas > 0 ? `Total gasto: ${formatBRL(despesas)}` : null,
       receitas > 0 ? `Total recebido: ${formatBRL(receitas)}` : null,
-    ].filter(Boolean).join(' · ');
+    ].filter(Boolean);
+    if (future.length > 0) parts.push(`${future.length} parcela(s) futura(s) — ${formatBRL(futureTotal)}`);
+    return parts.join(' · ');
   }, [filteredForSearch]);
 
+  // Tonalidades dos cartões de crédito derivadas da cor de destaque escolhida em Configurações
+  // (recalcula só quando o tema de cor muda, não a cada render).
+  const cardGradients = useMemo(() => buildCardGradients(settings.colorTheme), [settings.colorTheme]);
+
   const data = {
-    transactions, accounts, cards, goals, caixinhas, recurring, benefits, investments, settings, period, customRange,
+    transactions, accounts, cards, goals, caixinhas, recurring, benefits, investments, settings, period, customRange, cardGradients,
     monthlyHistory: realMonthlyHistory, categoryComparison: realCategoryComparison, investmentsTotal, insights,
   };
   const actions = {
@@ -4420,7 +5685,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className={`cerne-root flex h-screen${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)' }}>
+      <div className={`cerne-root flex h-screen${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)', height: '100dvh' }}>
         <style>{GLOBAL_STYLES}</style>
         <LoadingScreen />
       </div>
@@ -4428,7 +5693,7 @@ export default function App() {
   }
 
   return (
-    <div className={`cerne-root flex h-screen overflow-hidden${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)' }}>
+    <div className={`cerne-root flex h-screen overflow-hidden${rootClassSuffix}`} style={{ backgroundColor: 'var(--bg)', height: '100dvh' }}>
       <style>{GLOBAL_STYLES}</style>
       <Sidebar activePage={activePage} setActivePage={goTo} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} onNewTransaction={() => setModal({ type: 'newTransaction' })} dropboxConnected={dropboxConnected} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError} onGoToSettings={() => goTo('configuracoes')} />
 
@@ -4436,8 +5701,8 @@ export default function App() {
         <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
         {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
 
-        <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 print-area">
-          {search.trim() && activePage === 'dashboard' ? (
+        <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 print-area" onScroll={handleContentScroll}>
+          {search.trim() ? (
             <Card>
               <SectionTitle subtitle={searchTotals}>Resultados para "{search}"</SectionTitle>
               {filteredForSearch.length === 0 ? (
@@ -4459,20 +5724,21 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
-              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} />}
-              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} onAdd={addCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} />}
-              {activePage === 'investimentos' && <InvestmentsPage investments={investments} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
-              {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} />}
-              {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} onAdd={addRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
-              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} />}
+              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
+              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} />}
+              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
+              {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
+              {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
+              {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
+              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
                   settings={settings} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
                   dropboxConnected={dropboxConnected} dropboxBusy={dropboxBusy} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError}
                   onConnectDropbox={connectDropbox} onDisconnectDropbox={disconnectDropboxAccount}
                   onBackupNow={backupNowToDropbox} onRestoreFromDropbox={restoreFromDropbox}
+                  onExportBackup={exportBackupFile} onImportBackup={importBackupFile}
                 />
               )}
             </>
@@ -4488,6 +5754,8 @@ export default function App() {
       )}
 
       <ToastContainer toasts={toasts} />
+      {settings.fabEnabled !== false && <FAB onClick={() => setModal({ type: 'newTransaction' })} shrink={fabScrolling} />}
+      {celebration && <GoalCelebration key={celebration.id} origin={celebration.origin} onDone={() => setCelebration(null)} />}
     </div>
   );
 }
