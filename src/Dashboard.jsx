@@ -30,7 +30,6 @@ const GLOBAL_STYLES = `
 
 :root {
   --primary: #5D7052;
-  --primary-rgb: 93,112,82;
   --primary-dark: #4C5C43;
   --primary-soft: #E9EDE4;
   --secondary: #8A9B7D;
@@ -53,7 +52,6 @@ const GLOBAL_STYLES = `
 
 .cerne-root.dark {
   --primary: #8FA680;
-  --primary-rgb: 143,166,128;
   --primary-dark: #7A9068;
   --primary-soft: #2E3A28;
   --secondary: #8A9B7D;
@@ -86,20 +84,20 @@ const GLOBAL_STYLES = `
 /* Temas de cor de destaque (opcionais, escolhidos em Configurações → Aparência).
    Cada um só troca --primary / --primary-dark / --primary-soft; o resto dos tokens
    (fundo, texto, bordas, cores semânticas) continua vindo de :root / .dark acima. */
-.cerne-root.theme-azul { --primary: #4A6FA5; --primary-rgb: 74,111,165; --primary-dark: #3B5A87; --primary-soft: #E6ECF3; }
-.cerne-root.theme-azul.dark { --primary: #7CA3D6; --primary-rgb: 124,163,214; --primary-dark: #6690C7; --primary-soft: #26303F; }
+.cerne-root.theme-azul { --primary: #4A6FA5; --primary-dark: #3B5A87; --primary-soft: #E6ECF3; }
+.cerne-root.theme-azul.dark { --primary: #7CA3D6; --primary-dark: #6690C7; --primary-soft: #26303F; }
 
-.cerne-root.theme-rosa { --primary: #B5677E; --primary-rgb: 181,103,126; --primary-dark: #9A5268; --primary-soft: #F5E9EC; }
-.cerne-root.theme-rosa.dark { --primary: #D98CA0; --primary-rgb: 217,140,160; --primary-dark: #C4728A; --primary-soft: #3A2830; }
+.cerne-root.theme-rosa { --primary: #B5677E; --primary-dark: #9A5268; --primary-soft: #F5E9EC; }
+.cerne-root.theme-rosa.dark { --primary: #D98CA0; --primary-dark: #C4728A; --primary-soft: #3A2830; }
 
-.cerne-root.theme-vermelho { --primary: #A85D4E; --primary-rgb: 168,93,78; --primary-dark: #8E4B3E; --primary-soft: #F3E7E3; }
-.cerne-root.theme-vermelho.dark { --primary: #CC8271; --primary-rgb: 204,130,113; --primary-dark: #B96D5C; --primary-soft: #3A2A24; }
+.cerne-root.theme-vermelho { --primary: #A85D4E; --primary-dark: #8E4B3E; --primary-soft: #F3E7E3; }
+.cerne-root.theme-vermelho.dark { --primary: #CC8271; --primary-dark: #B96D5C; --primary-soft: #3A2A24; }
 
-.cerne-root.theme-branco { --primary: #3A3A3A; --primary-rgb: 58,58,58; --primary-dark: #2A2A2A; --primary-soft: #EDEDEC; }
-.cerne-root.theme-branco.dark { --primary: #C9C9C9; --primary-rgb: 201,201,201; --primary-dark: #B5B5B5; --primary-soft: #333333; }
+.cerne-root.theme-branco { --primary: #3A3A3A; --primary-dark: #2A2A2A; --primary-soft: #EDEDEC; }
+.cerne-root.theme-branco.dark { --primary: #C9C9C9; --primary-dark: #B5B5B5; --primary-soft: #333333; }
 
-.cerne-root.theme-ameixa { --primary: #7D5A82; --primary-rgb: 125,90,130; --primary-dark: #664867; --primary-soft: #EFE7F0; }
-.cerne-root.theme-ameixa.dark { --primary: #B08AB8; --primary-rgb: 176,138,184; --primary-dark: #9B76A3; --primary-soft: #332B36; }
+.cerne-root.theme-ameixa { --primary: #7D5A82; --primary-dark: #664867; --primary-soft: #EFE7F0; }
+.cerne-root.theme-ameixa.dark { --primary: #B08AB8; --primary-dark: #9B76A3; --primary-soft: #332B36; }
 
 .cerne-root, .cerne-root * { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
 .font-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
@@ -112,8 +110,8 @@ const GLOBAL_STYLES = `
 .shadow-soft { box-shadow: 0 1px 2px rgba(35,35,35,0.04), 0 4px 14px rgba(35,35,35,0.05); }
 .shadow-soft-lg { box-shadow: 0 2px 6px rgba(35,35,35,0.05), 0 14px 28px rgba(35,35,35,0.08); }
 
-.focus-ring:focus { outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.35); }
-.focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.35); }
+.focus-ring:focus { outline: none; box-shadow: 0 0 0 3px rgba(93,112,82,0.22); }
+.focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(93,112,82,0.22); }
 
 @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-up { animation: fadeSlideUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
@@ -172,13 +170,6 @@ function formatDate(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('pt-BR');
-}
-// Versão compacta da data (ano com 2 dígitos) — usada onde o espaço é curto e precisa
-// dividir a linha com outra informação, como o badge de parcela (ex.: "3/12").
-function formatDateShort(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 function formatDateLong(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -323,11 +314,7 @@ function computeMonthlyHistory(transactions, accounts, investmentsTotal, monthsB
 function computeCategoryTotals(transactions, year, month) {
   const totals = {};
   transactions.filter((t) => t.type === 'despesa' && isRealized(t) && isSameMonth(t.date, year, month)).forEach((t) => {
-    // .trim() garante que toda despesa realizada é contabilizada em alguma categoria mesmo se
-    // vier com espaços extras (ex.: importação de CSV) — sem isso, "Mercado" e "Mercado " viram
-    // duas fatias separadas no gráfico e a categoria parece estar "faltando" gasto.
-    const key = (t.category || 'Outros').trim() || 'Outros';
-    totals[key] = (totals[key] || 0) + t.amount;
+    totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
   return totals;
 }
@@ -3084,7 +3071,6 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> | 'debito'
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
-  const [search, setSearch] = useState('');
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
 
   const refDate = useMemo(() => {
@@ -3101,17 +3087,15 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
   // "Fatura" mostra só crédito, porque é a única que faz sentido marcar como paga (a compra em
   // débito já saiu da conta na hora ou é agendada, não existe "fatura" pra ela).
   const faturaTx = useMemo(() => transactions
-    .filter((t) => t.type === 'despesa' && t.cardId && (cardFilter === 'all' || cardFilter === t.cardId) && isSameMonth(t.date, year, month)
-      && t.description.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, search]);
+    .filter((t) => t.type === 'despesa' && t.cardId && (cardFilter === 'all' || cardFilter === t.cardId) && isSameMonth(t.date, year, month))
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month]);
 
   // "Todas as despesas do mês" mistura débito e crédito de propósito, só pra visualizar o mês
   // inteiro — sem botão de pagar fatura, porque débito não tem esse conceito.
   const todasTx = useMemo(() => transactions
     .filter((t) => t.type === 'despesa' && isSameMonth(t.date, year, month)
-      && (cardFilter === 'all' || (cardFilter === 'debito' ? !t.cardId : t.cardId === cardFilter))
-      && t.description.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, search]);
+      && (cardFilter === 'all' || (cardFilter === 'debito' ? !t.cardId : t.cardId === cardFilter)))
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
   const total = list.reduce((s, t) => s + t.amount, 0);
@@ -3150,33 +3134,21 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
       )}
 
       <Card>
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--bg)' }}>
-            <button
-              onClick={() => setSubview('fatura')}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-              style={subview === 'fatura' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
-            >
-              Fatura (crédito)
-            </button>
-            <button
-              onClick={() => setSubview('todas')}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-              style={subview === 'todas' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
-            >
-              Todas as despesas do mês
-            </button>
-          </div>
-          <div className="relative w-full sm:w-56">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por descrição..."
-              className="w-full pl-8 pr-3 py-2 rounded-xl text-sm focus-ring"
-              style={inputStyle}
-            />
-          </div>
+        <div className="flex items-center gap-1 mb-4 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--bg)' }}>
+          <button
+            onClick={() => setSubview('fatura')}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+            style={subview === 'fatura' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
+          >
+            Fatura (crédito)
+          </button>
+          <button
+            onClick={() => setSubview('todas')}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+            style={subview === 'todas' ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { color: 'var(--text-soft)' }}
+          >
+            Todas as despesas do mês
+          </button>
         </div>
         <div className="flex items-center justify-between mb-3">
           <SectionTitle subtitle={subview === 'fatura' ? 'Só lançamentos no crédito deste mês' : 'Débito + crédito deste mês'}>
@@ -3185,11 +3157,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
           <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</span>
         </div>
         {list.length === 0 ? (
-          <EmptyState
-            icon={CalendarIcon}
-            title="Nada por aqui"
-            description={search ? `Nenhum lançamento com "${search}" encontrado para este mês com esse filtro.` : 'Nenhum lançamento encontrado para este mês com esse filtro.'}
-          />
+          <EmptyState icon={CalendarIcon} title="Nada por aqui" description="Nenhum lançamento encontrado para este mês com esse filtro." />
         ) : (
           <div className="space-y-1">
             {list.map((t) => {
@@ -3199,16 +3167,10 @@ function MonthlyInvoicePage({ cards, transactions, accounts, onPayInvoice, onAdv
                 <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
                   <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
-                      {t.description}
-                      {t.installmentGroupId && (
-                        <span className="ml-1.5 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                          {t.installmentIndex}/{t.installmentCount}
-                        </span>
-                      )}
-                    </p>
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
                     <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                      {formatDateShort(t.date)} · {card ? card.bank : 'Débito'}
+                      {formatDate(t.date)} · {card ? card.bank : 'Débito'}
+                      {t.installmentGroupId && ` · ${t.installmentIndex}/${t.installmentCount}`}
                     </p>
                   </div>
                   <StatusBadge status={t.status} type={t.type} />
