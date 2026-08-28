@@ -2535,19 +2535,25 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
 // esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
 // como um botão pequeno embutido na própria linha.
-function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, isCurrentMonth, viewedCycle, onPayInvoice }) {
+function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, onPayInvoice }) {
   const [showPayModal, setShowPayModal] = useState(false);
-  const { invoice, count } = useMemo(() => {
-    if (!isCurrentMonth) {
-      const items = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
-        && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })());
-      return { invoice: items.reduce((s, t) => s + t.amount, 0), count: items.length };
-    }
-    const cutoff = ymd(getNextCardDueDate(card));
-    const items = transactions.filter((t) => t.cardId === card.id && t.type === 'despesa'
-      && (!card.paidThroughDate || t.date > card.paidThroughDate) && t.date <= cutoff);
-    return { invoice: items.reduce((s, t) => s + t.amount, 0), count: items.length };
-  }, [card, transactions, isCurrentMonth, viewedCycle?.year, viewedCycle?.month]);
+  const { invoice, count, isPayable } = useMemo(() => {
+    // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
+    // lançamentos abaixo já usa. Antes, no mês corrente (offset 0), essa linha calculava a
+    // fatura "em aberto agora" (por data de vencimento), um número diferente do total do mês
+    // sendo exibido sempre que o cartão já tinha fechado o ciclo daquele mês — daí o valor não
+    // bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
+    const items = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
+      && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
+    const invoice = items.reduce((s, t) => s + t.amount, 0);
+    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
+    // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
+    // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
+    // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
+    const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
+    const isPayable = dueCycle.year === year && dueCycle.month === month;
+    return { invoice, count: items.length, isPayable };
+  }, [card, transactions, year, month]);
 
   return (
     <div
@@ -2564,7 +2570,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
       </div>
       <div className="text-right shrink-0">
         <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(invoice)}</p>
-        {isCurrentMonth && (invoice > 0 ? (
+        {isPayable && (invoice > 0 ? (
           <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-[11px] font-medium underline" style={{ color: 'var(--primary)' }}>Pagar fatura</button>
         ) : (
           <span className="text-[11px] font-medium flex items-center justify-end gap-1" style={{ color: 'var(--income)' }}><Check size={10} /> Em dia</span>
@@ -4115,7 +4121,6 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   const year = refDate.getFullYear();
   const month = refDate.getMonth();
   const monthLabel = refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  const viewedCycle = useMemo(() => ({ year, month, label: capitalizeFirst(monthLabel) }), [year, month, monthLabel]);
   // Clicar numa linha de cartão seleciona só ele (e some com as outras linhas da lista); clicar
   // de novo tira a seleção. Não faria sentido "clicar fora" pra desmarcar, então o próprio card
   // selecionado é o único jeito de reverter.
@@ -4174,7 +4179,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
             <CardInvoiceRow
               key={c.id} card={c} transactions={transactions} accounts={accounts}
               selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
-              isCurrentMonth={monthOffset === 0} viewedCycle={monthOffset === 0 ? null : viewedCycle}
+              year={year} month={month}
               onPayInvoice={onPayInvoice}
             />
           ))}
