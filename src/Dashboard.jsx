@@ -743,24 +743,48 @@ function normalizeForFingerprint(description) {
     .trim();
 }
 
-// Identidade de um lançamento para fins de deduplicação: mesma data + descrição normalizada + valor.
-function computeFingerprint(date, description, amount) {
-  return `${date}|${normalizeForFingerprint(description)}|${Math.abs(amount).toFixed(2)}`;
+function daysBetween(dateA, dateB) {
+  return Math.round((new Date(dateA + 'T00:00:00') - new Date(dateB + 'T00:00:00')) / 86400000);
 }
 
-function buildFingerprintMultiset(transactions) {
-  const map = new Map();
-  transactions.forEach((t) => {
-    const fp = computeFingerprint(t.date, t.description, t.amount);
-    map.set(fp, (map.get(fp) || 0) + 1);
+// Semelhança simples entre dois nomes (0 a 1) — quantas palavras em comum, proporcionalmente.
+// Não precisa ser um algoritmo sofisticado, só o suficiente pra reconhecer nomes parecidos mas
+// não idênticos (ex.: "Steam", digitado à mão, vs "Pag*Steam", do jeito que o Nubank registra).
+function textSimilarity(a, b) {
+  const wordsA = new Set(normalizeForFingerprint(a).split(' ').filter(Boolean));
+  const wordsB = new Set(normalizeForFingerprint(b).split(' ').filter(Boolean));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let common = 0;
+  wordsA.forEach((w) => { if (wordsB.has(w)) common++; });
+  return common / Math.max(wordsA.size, wordsB.size);
+}
+
+// Acha, entre os lançamentos já existentes ainda não "usados" por outra linha da fatura, o
+// melhor candidato a duplicata pra uma linha importada — nessa ordem de prioridade, como pedido:
+// 1) valor: funciona como filtro (tem que bater, é o sinal mais confiável pra dinheiro);
+// 2) data: quanto mais perto, maior a pontuação (aceita até 5 dias de diferença, cobrindo
+//    compra x postagem no extrato, ou fuso/final de semana);
+// 3) nome: só entra como desempate leve, via semelhança de palavras — não precisa ser idêntico.
+function findBestDuplicateMatch(row, pool) {
+  const rowAmount = Math.abs(row.amount).toFixed(2);
+  let best = null;
+  let bestScore = -Infinity;
+  pool.forEach((c) => {
+    if (c.used || Math.abs(c.amount).toFixed(2) !== rowAmount) return;
+    const dayDiff = Math.abs(daysBetween(row.date, c.date));
+    if (dayDiff > 5) return;
+    const dateScore = (5 - dayDiff) / 5;
+    const nameScore = textSimilarity(row.description, c.description);
+    const score = dateScore * 10 + nameScore;
+    if (score > bestScore) { bestScore = score; best = c; }
   });
-  return map;
+  return best;
 }
 
 // Faz o parse do CSV de fatura do Nubank (colunas: date,title,amount) separando compras reais
 // de pagamentos/adiantamentos de fatura, e sinalizando duplicatas contra o que já existe no app.
 function parseNubankFaturaCSV(rows, existingTransactions) {
-  const available = buildFingerprintMultiset(existingTransactions);
+  const pool = existingTransactions.map((t) => ({ date: t.date, description: t.description, amount: t.amount, used: false }));
   const purchases = [];
   const payments = [];
   let paymentsTotal = 0;
@@ -787,10 +811,12 @@ function parseNubankFaturaCSV(rows, existingTransactions) {
 
     const installment = parseInstallment(rawTitle);
     const description = installment ? installment.clean : rawTitle;
-    const fingerprint = computeFingerprint(rawDate, description, amount);
-    const remaining = available.get(fingerprint) || 0;
-    const isDuplicate = remaining > 0;
-    if (isDuplicate) available.set(fingerprint, remaining - 1);
+    const match = findBestDuplicateMatch({ date: rawDate, description, amount }, pool);
+    const isDuplicate = !!match;
+    // "Exata" quando data e nome normalizado batem plenamente — usada só pra decidir o texto
+    // mostrado (duplicata certa vs. possível duplicata), a lógica de seleção é a mesma pras duas.
+    const isExactMatch = isDuplicate && match.date === rawDate && normalizeForFingerprint(match.description) === normalizeForFingerprint(description);
+    if (match) match.used = true;
 
     purchases.push({
       rowId: `row-${idx}`,
@@ -799,8 +825,8 @@ function parseNubankFaturaCSV(rows, existingTransactions) {
       category: guessCategory(description),
       amount: Math.abs(amount),
       installment: installment ? { current: installment.current, total: installment.total } : null,
-      fingerprint,
       isDuplicate,
+      isExactMatch,
       include: !isDuplicate,
     });
   });
@@ -3276,7 +3302,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
                     <td className="py-2 pr-3">
                       <span style={{ color: 'var(--text)' }}>{r.description}</span>
                       {r.installment && <span className="ml-2 text-xs" style={{ color: 'var(--text-soft)' }}>parcela {r.installment.current}/{r.installment.total}</span>}
-                      {r.isDuplicate && <span className="ml-2 text-xs font-medium" style={{ color: 'var(--alert)' }}>possível duplicata</span>}
+                      {r.isDuplicate && <span className="ml-2 text-xs font-medium" style={{ color: 'var(--alert)' }}>{r.isExactMatch ? 'duplicata' : 'possível duplicata (nome parecido)'}</span>}
                     </td>
                     <td className="py-2 pr-3">
                       <Select value={r.category} onChange={(e) => setRowCategory(r.rowId, e.target.value)} className="px-2 py-1.5 rounded-lg text-base sm:text-xs focus-ring" style={inputStyle}>
