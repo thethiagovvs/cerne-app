@@ -205,6 +205,23 @@ function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('pt-BR');
 }
+// Compras parceladas importadas da fatura ANTES do ajuste no fluxo de importação guardavam a
+// parcela como texto solto dentro da descrição (ex: "Pag*Steam (parcela 3/3)"), sem preencher os
+// campos estruturados (installmentGroupId/Index/Count) que a tag de parcela depende. Esse helper
+// extrai isso como fallback, pra esses lançamentos antigos também mostrarem a tag corretamente
+// sem precisar reimportar nada.
+function parseInstallmentFallback(description) {
+  const m = description.match(/\s*\(parcela\s*(\d+)\s*\/\s*(\d+)\)\s*$/i);
+  if (!m) return null;
+  return { clean: description.slice(0, m.index).trim(), index: Number(m[1]), count: Number(m[2]) };
+}
+// Dado um lançamento, devolve { desc, index, count } prontos pra exibir — usa os campos
+// estruturados quando existem (compra parcelada normal) ou o fallback acima (importação antiga).
+function getInstallmentDisplay(t) {
+  if (t.installmentGroupId) return { desc: t.description, index: t.installmentIndex, count: t.installmentCount };
+  const fallback = parseInstallmentFallback(t.description);
+  return fallback ? { desc: fallback.clean, index: fallback.index, count: fallback.count } : { desc: t.description, index: null, count: null };
+}
 // Mesma data, mas com o ano em 2 dígitos (ex: 23/08/27) — usada nos cards mobile onde a
 // data divide espaço com a tag de parcela (3/12), pra sobrar mais respiro sem perder o ano.
 function formatDateShortYear(dateStr) {
@@ -2113,6 +2130,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
           <div className="sm:hidden space-y-2">
             {recent.map((tx) => {
               const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              const inst = getInstallmentDisplay(tx);
               return (
                 <SwipeableRow
                   key={tx.id} onEdit={() => onEdit(tx)} onDelete={() => setConfirmDeleteTx(tx)}
@@ -2122,10 +2140,10 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                     <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
-                        {tx.installmentGroupId && (
+                        <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                        {inst.count && (
                           <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                            {tx.installmentIndex}/{tx.installmentCount}
+                            {inst.index}/{inst.count}
                           </span>
                         )}
                       </div>
@@ -2144,15 +2162,16 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
           <div className="hidden sm:block space-y-1">
             {recent.map((tx) => {
               const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
+              const inst = getInstallmentDisplay(tx);
               return (
                 <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
                   <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
-                      {tx.installmentGroupId && (
+                      <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                      {inst.count && (
                         <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                          {tx.installmentIndex}/{tx.installmentCount}
+                          {inst.index}/{inst.count}
                         </span>
                       )}
                     </div>
@@ -3161,7 +3180,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
       .map((r) => ({
         id: uid(),
         date: r.date,
-        description: r.installment ? `${r.description} (parcela ${r.installment.current}/${r.installment.total})` : r.description,
+        description: r.description,
         category: r.category,
         type: 'despesa',
         account: card ? card.accountId : targetAccount,
@@ -3169,6 +3188,12 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
         paymentMethod: 'Cartão de crédito',
         amount: r.amount,
         status: card ? 'Pendente' : 'Pago',
+        // Antes a parcela virava texto solto tipo "(parcela 3/3)" dentro da descrição — a tag
+        // na 2ª linha do card (data · cartão · forma de pagamento · parcela) depende desses três
+        // campos estruturados, os mesmos usados numa compra parcelada criada manualmente.
+        installmentGroupId: r.installment ? uid() : null,
+        installmentIndex: r.installment ? r.installment.current : null,
+        installmentCount: r.installment ? r.installment.total : null,
       }));
     onConfirm(toImport, { duplicates: duplicateCount, payments: parsed.payments.length, paymentsTotal: parsed.paymentsTotal });
   }
@@ -3498,6 +3523,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
                 const card = tx.cardId ? cards.find((c) => c.id === tx.cardId) : null;
                 const accName = accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida';
+                const inst = getInstallmentDisplay(tx);
                 return (
                   <SwipeableRow
                     key={tx.id} onEdit={() => setEditing(tx)} onDelete={() => onDelete(tx)}
@@ -3508,8 +3534,8 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{tx.description}</p>
-                            {tx.installmentGroupId && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{tx.installmentIndex}/{tx.installmentCount}</span>}
+                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                            {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
                           </div>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</span>
                         </div>
@@ -3547,14 +3573,16 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                   </tr>
                 </thead>
                 <tbody style={{ borderTop: '1px solid var(--border)' }}>
-                  {pageData.map((tx) => (
+                  {pageData.map((tx) => {
+                    const inst = getInstallmentDisplay(tx);
+                    return (
                     <tr key={tx.id} className="text-sm hover:bg-black/[0.02]">
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
-                        {tx.description}
-                        {tx.installmentGroupId && (
+                        {inst.desc}
+                        {inst.count && (
                           <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                            {tx.installmentIndex}/{tx.installmentCount}
+                            {inst.index}/{inst.count}
                           </span>
                         )}
                       </td>
@@ -3573,7 +3601,8 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4194,6 +4223,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
                 const acc = !card ? accounts.find((a) => a.id === t.account) : null;
+                const inst = getInstallmentDisplay(t);
                 return (
                   <SwipeableRow
                     key={t.id} onEdit={onEditTransaction ? () => setEditingTx(t) : undefined} onDelete={onDeleteTransaction ? () => onDeleteTransaction(t) : undefined}
@@ -4203,13 +4233,13 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{t.description}</p>
+                          <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs">
                           <span className="truncate" style={{ color: 'var(--text-soft)' }}>
                             {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
-                            {t.installmentGroupId && ` · (${t.installmentIndex}/${t.installmentCount})`}
+                            {inst.count && ` · (${inst.index}/${inst.count})`}
                           </span>
                           {subview !== 'fatura' && <span className="shrink-0"><StatusBadge status={t.status} type={t.type} /></span>}
                         </div>
@@ -4232,14 +4262,15 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
                 const acc = !card ? accounts.find((a) => a.id === t.account) : null;
+                const inst = getInstallmentDisplay(t);
                 return (
                   <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
                     <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{t.description}</p>
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                       <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>
                         {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
-                        {t.installmentGroupId && ` · (${t.installmentIndex}/${t.installmentCount})`}
+                        {inst.count && ` · (${inst.index}/${inst.count})`}
                       </p>
                     </div>
                     {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
