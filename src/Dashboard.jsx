@@ -300,7 +300,7 @@ const VISIBILITY_SCHEMA = [
       { key: 'kpiReceitas', label: 'Card "Receitas do período"' },
       { key: 'kpiDespesas', label: 'Card "Despesas do período"' },
       { key: 'kpiEconomia', label: 'Card "Economia acumulada"' },
-      { key: 'kpiMeta', label: 'Card "Meta mensal"' },
+      { key: 'kpiMeta', label: 'Card "Meta de economia"' },
       { key: 'kpiPatrimonio', label: 'Card "Patrimônio total"' },
       { key: 'evolutionChart', label: 'Gráfico de evolução financeira' },
       { key: 'categoryDonut', label: 'Gastos por categoria (gráfico)' },
@@ -315,10 +315,10 @@ const VISIBILITY_SCHEMA = [
     ],
   },
   {
-    key: 'transacoes', label: 'Transações e Receitas', essentialLabel: 'Busca, filtros, tabela e botão "Novo"',
+    key: 'transacoes', label: 'Transações', essentialLabel: 'Busca, filtros, tabela e botão "Novo"',
     items: [
-      { key: 'faturaBanner', label: 'Aviso com atalho para a Fatura mensal (em Transações)' },
-      { key: 'statCards', label: 'Cards de totais (na aba Receitas)' },
+      { key: 'faturaBanner', label: 'Aviso com atalho para a Fatura mensal' },
+      { key: 'statCards', label: 'Cards de totais (despesas e receitas do filtro atual)' },
     ],
   },
   {
@@ -352,7 +352,7 @@ const VISIBILITY_SCHEMA = [
     ],
   },
   {
-    key: 'relatorios', label: 'Relatórios', essentialLabel: 'Gráfico receitas x despesas',
+    key: 'relatorios', label: 'Relatórios', essentialLabel: 'Exportar Excel e imprimir/PDF',
     items: [
       { key: 'categoryComparison', label: 'Comparativo por categoria (mês atual x anterior)' },
     ],
@@ -1658,7 +1658,6 @@ const NAV_ITEMS = [
   { id: 'contas', label: 'Contas Bancárias', icon: Landmark },
   { id: 'cartoes', label: 'Cartões', icon: CreditCard },
   { id: 'transacoes', label: 'Transações', icon: ArrowLeftRight },
-  { id: 'receitas', label: 'Receitas', icon: TrendingUp },
   { id: 'investimentos', label: 'Investimentos', icon: PieChartIcon },
   { id: 'metas', label: 'Metas', icon: Target },
   { id: 'recorrentes', label: 'Despesas Recorrentes', icon: RefreshCw },
@@ -2023,7 +2022,7 @@ function KPIRow({ kpis, settings, accounts }) {
     { key: 'kpiReceitas', title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
     { key: 'kpiDespesas', title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
     { key: 'kpiEconomia', title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
-    { key: 'kpiMeta', title: 'Meta mensal', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
+    { key: 'kpiMeta', title: 'Meta de economia', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
     { key: 'kpiPatrimonio', title: 'Patrimônio total', value: formatBRL(kpis.patrimonio), description: 'Contas + investimentos', icon: Landmark, color: 'var(--invest)', soft: 'var(--invest-soft)', growth: kpis.growth.patrimonio },
   ];
   const cards = allCards.filter((c) => isVisible(settings, 'dashboard', c.key));
@@ -2280,7 +2279,7 @@ function MonthSummaryPanel({ transactions, kpis }) {
 
 /* ---------- Metas (preview + cards) ---------- */
 
-function GoalCard({ goal, onAddFunds, onDelete, onCompleted, compact }) {
+function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) {
   const Icon = GOAL_ICONS[goal.icon] || Target;
   const percent = Math.min(100, (goal.current / goal.target) * 100);
   const [adding, setAdding] = useState(false);
@@ -2313,7 +2312,10 @@ function GoalCard({ goal, onAddFunds, onDelete, onCompleted, compact }) {
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Previsão: {deadlineLabel}</p>
         </div>
         {!compact && (
-          <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+          <div className="flex items-center gap-1 shrink-0">
+            {onEdit && <button onClick={() => onEdit(goal)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>}
+            <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+          </div>
         )}
       </div>
       <div className="flex items-end justify-between mb-2">
@@ -2381,8 +2383,8 @@ function GoalCard({ goal, onAddFunds, onDelete, onCompleted, compact }) {
   );
 }
 
-function GoalForm({ onSave, onClose }) {
-  const [form, setForm] = useState({ name: '', target: 0, current: 0, deadline: '', icon: 'Wallet' });
+function GoalForm({ initial, onSave, onClose }) {
+  const [form, setForm] = useState(initial || { name: '', target: 0, current: 0, deadline: '', icon: 'Wallet' });
   const [errors, setErrors] = useState({});
   function validate() {
     const e = {};
@@ -2393,23 +2395,28 @@ function GoalForm({ onSave, onClose }) {
     return Object.keys(e).length === 0;
   }
   return (
-    <Modal title="Nova meta" onClose={onClose}>
+    <Modal title={initial ? 'Editar meta' : 'Nova meta'} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <FieldLabel error={errors.name}>Nome da meta</FieldLabel>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Viagem para a praia" />
           {errors.name && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.name}</p>}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className={initial ? '' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'}>
           <div>
             <FieldLabel error={errors.target}>Valor objetivo</FieldLabel>
             <CurrencyInput value={form.target} onChange={(v) => setForm({ ...form, target: v })} />
             {errors.target && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.target}</p>}
           </div>
-          <div>
-            <FieldLabel>Valor já guardado</FieldLabel>
-            <CurrencyInput value={form.current} onChange={(v) => setForm({ ...form, current: v })} />
-          </div>
+          {/* No modo edição não dá pra mexer direto no valor já guardado — isso é feito por
+              "Adicionar valor" no card, que também registra no histórico de aportes. Editar aqui
+              livremente desalinharia esse histórico do valor atual. */}
+          {!initial && (
+            <div>
+              <FieldLabel>Valor já guardado</FieldLabel>
+              <CurrencyInput value={form.current} onChange={(v) => setForm({ ...form, current: v })} />
+            </div>
+          )}
         </div>
         <div>
           <FieldLabel error={errors.deadline}>Previsão de conclusão</FieldLabel>
@@ -2428,7 +2435,7 @@ function GoalForm({ onSave, onClose }) {
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (validate()) onSave(form); }}>Criar meta</Button>
+          <Button onClick={() => { if (validate()) onSave(form); }}>{initial ? 'Salvar alterações' : 'Criar meta'}</Button>
         </div>
       </div>
     </Modal>
@@ -3340,8 +3347,9 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ filterType, title, transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura }) {
+function TransactionsPage({ transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura }) {
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'despesa' | 'receita'
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -3355,20 +3363,19 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
   const [showExportMenu, setShowExportMenu] = useState(false);
   const filtersRef = useRef(null);
   const exportMenuRef = useRef(null);
-  const activeFilterCount = [categoryFilter, accountFilter, statusFilter].filter((f) => f !== 'all').length;
+  const activeFilterCount = [typeFilter, categoryFilter, accountFilter, statusFilter].filter((f) => f !== 'all').length;
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
   const pageSize = 8;
 
-  const base = filterType === 'all' ? transactions : transactions.filter((t) => t.type === filterType);
-
-  const filtered = useMemo(() => base.filter((t) => {
+  const filtered = useMemo(() => transactions.filter((t) => {
+    const matchesType = typeFilter === 'all' || t.type === typeFilter;
     const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
     const matchesAccount = accountFilter === 'all' || t.account === accountFilter;
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-    return matchesSearch && matchesCategory && matchesAccount && matchesStatus;
-  }), [base, search, categoryFilter, accountFilter, statusFilter]);
+    return matchesType && matchesSearch && matchesCategory && matchesAccount && matchesStatus;
+  }), [transactions, typeFilter, search, categoryFilter, accountFilter, statusFilter]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -3382,7 +3389,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
     return arr;
   }, [filtered, sortConfig]);
 
-  useEffect(() => { setPage(1); }, [search, categoryFilter, accountFilter, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, categoryFilter, accountFilter, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
@@ -3423,7 +3430,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url; link.download = `${title.toLowerCase().replace(/\s/g, '-')}.csv`; link.click();
+    link.href = url; link.download = 'transacoes.csv'; link.click();
     URL.revokeObjectURL(url);
   }
   function exportExcel() {
@@ -3431,7 +3438,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Transações');
-    XLSX.writeFile(wb, `${title.toLowerCase().replace(/\s/g, '-')}.xlsx`);
+    XLSX.writeFile(wb, 'transacoes.xlsx');
   }
 
   const sortableColumns = [
@@ -3449,10 +3456,10 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
           <Button size="sm" variant="secondary" icon={CalendarIcon} onClick={onGoToFatura}>Fatura mensal</Button>
         </div>
       )}
-      {filterType !== 'all' && isVisible(settings, 'transacoes', 'statCards') && (
+      {isVisible(settings, 'transacoes', 'statCards') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <StatCard title={`Total de ${title.toLowerCase()}`} value={formatBRL(filterType === 'receita' ? totalReceitas : totalDespesas)} description="No filtro atual" icon={filterType === 'receita' ? TrendingUp : TrendingDown} color={filterType === 'receita' ? 'var(--income)' : 'var(--expense)'} soft={filterType === 'receita' ? 'var(--income-soft)' : 'var(--expense-soft)'} />
-          <StatCard title="Lançamentos no filtro" value={String(filtered.length)} description="Itens encontrados" icon={ArrowLeftRight} color="var(--invest)" soft="var(--invest-soft)" />
+          {typeFilter !== 'receita' && <StatCard title="Total de despesas" value={formatBRL(totalDespesas)} description="No filtro atual" icon={TrendingDown} color="var(--expense)" soft="var(--expense-soft)" />}
+          {typeFilter !== 'despesa' && <StatCard title="Total de receitas" value={formatBRL(totalReceitas)} description="No filtro atual" icon={TrendingUp} color="var(--income)" soft="var(--income-soft)" />}
         </div>
       )}
 
@@ -3471,6 +3478,11 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
 
             {/* Telas maiores: filtros lado a lado. No mobile viram um único botão "Filtros" com popover — 3 selects lado a lado apertava demais a linha de controles. */}
             <div className="hidden sm:flex items-center gap-2">
+              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+                <option value="all">Despesas e receitas</option>
+                <option value="despesa">Só despesas</option>
+                <option value="receita">Só receitas</option>
+              </Select>
               <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
                 <option value="all">Todas categorias</option>
                 {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -3497,6 +3509,11 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                 )}
               </button>
               <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="center" className="p-3 space-y-2.5">
+                <Select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+                  <option value="all">Despesas e receitas</option>
+                  <option value="despesa">Só despesas</option>
+                  <option value="receita">Só receitas</option>
+                </Select>
                 <Select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
                   <option value="all">Todas categorias</option>
                   {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -3510,7 +3527,7 @@ function TransactionsPage({ filterType, title, transactions, accounts, cards, be
                   {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </Select>
                 {activeFilterCount > 0 && (
-                  <button onClick={() => { setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); setShowFilters(false); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+                  <button onClick={() => { setTypeFilter('all'); setCategoryFilter('all'); setAccountFilter('all'); setStatusFilter('all'); setShowFilters(false); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
                 )}
               </Popover>
             </div>
@@ -4275,13 +4292,15 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                            {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
+                          </div>
                           <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5 text-xs">
                           <span className="truncate" style={{ color: 'var(--text-soft)' }}>
                             {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
-                            {inst.count && ` · (${inst.index}/${inst.count})`}
                           </span>
                           {subview !== 'fatura' && <span className="shrink-0"><StatusBadge status={t.status} type={t.type} /></span>}
                         </div>
@@ -4309,10 +4328,12 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                   <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
                     <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                        {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
+                      </div>
                       <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>
                         {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
-                        {inst.count && ` · (${inst.index}/${inst.count})`}
                       </p>
                     </div>
                     {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
@@ -4541,7 +4562,39 @@ function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
         {investments.length === 0 ? (
           <EmptyState icon={PiggyBank} title="Nenhum investimento cadastrado" description="Adicione seus investimentos para acompanhar valor e rentabilidade reais." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile: mesmo card com swipe (arraste pra esquerda) usado em Transações e
+                Recorrentes, revelando editar/excluir por trás — antes só existia a tabela larga,
+                que obrigava rolar na horizontal num celular. */}
+            <div className="sm:hidden space-y-2">
+              {investments.map((inv) => {
+                const g = inv.currentValue - inv.invested;
+                const gp = inv.invested > 0 ? (g / inv.invested) * 100 : 0;
+                const color = INVESTMENT_CATEGORIES[inv.category] || '#A8A398';
+                return (
+                  <SwipeableRow
+                    key={inv.id} onEdit={() => setEditing(inv)} onDelete={() => setConfirmDelete(inv)}
+                    deleteConfirm={{ title: 'Excluir investimento', description: `Tem certeza que deseja excluir "${inv.name}"? Essa ação não pode ser desfeita.` }}
+                  >
+                    <div className="flex items-center gap-3 p-3">
+                      <div className="rounded-xl flex items-center justify-center shrink-0" style={{ width: 36, height: 36, backgroundColor: color + '26' }}>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{inv.name}</p>
+                          <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: g >= 0 ? 'var(--income)' : 'var(--expense)' }}>{g >= 0 ? '+' : ''}{gp.toFixed(1)}%</span>
+                        </div>
+                        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>Investido {formatBRL(inv.invested)} · Atual {formatBRL(inv.currentValue)}</p>
+                      </div>
+                    </div>
+                  </SwipeableRow>
+                );
+              })}
+            </div>
+
+            {/* Desktop/tablet: tabela, como antes. */}
+            <div className="hidden sm:block overflow-x-auto">
             <table className="w-full min-w-[560px]">
               <thead>
                 <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
@@ -4574,6 +4627,7 @@ function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
 
@@ -4595,8 +4649,9 @@ function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
    PÁGINA: METAS
    ============================================================ */
 
-function GoalsPage({ goals, onAdd, onAddFunds, onDelete, onCompleted }) {
+function GoalsPage({ goals, onAdd, onEdit, onAddFunds, onDelete, onCompleted }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null);
   return (
     <div className="space-y-6">
       <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Nova meta</Button>}>Suas metas financeiras</SectionTitle>
@@ -4604,10 +4659,11 @@ function GoalsPage({ goals, onAdd, onAddFunds, onDelete, onCompleted }) {
         <Card><EmptyState icon={Target} title="Nenhuma meta criada" description="Crie metas para acompanhar seus objetivos financeiros." /></Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onDelete={onDelete} onCompleted={onCompleted} />)}
+          {goals.map((g) => <GoalCard key={g.id} goal={g} onAddFunds={onAddFunds} onEdit={setEditingGoal} onDelete={onDelete} onCompleted={onCompleted} />)}
         </div>
       )}
       {showForm && <GoalForm onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
+      {editingGoal && <GoalForm initial={editingGoal} onSave={(f) => { onEdit(f); setEditingGoal(null); }} onClose={() => setEditingGoal(null)} />}
     </div>
   );
 }
@@ -4858,7 +4914,10 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
    ============================================================ */
 
 function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
-  const barData = monthlyHistory.map((m) => ({ month: m.month, Receitas: m.receitas, Despesas: m.despesas }));
+  // A data de atualização é fixada na montagem da página (não muda a cada re-render enquanto o
+  // usuário navega dentro dela) — os números em si já são sempre calculados na hora, isso é só
+  // uma referência de "quando eu abri esse relatório".
+  const updatedAt = useMemo(() => new Date(), []);
   function exportSummary() {
     const rows = monthlyHistory.map((m) => ({ Mês: m.month, Receitas: m.receitas, Despesas: m.despesas, Saldo: m.receitas - m.despesas, Patrimônio: m.patrimonio }));
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -4866,33 +4925,27 @@ function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
     XLSX.utils.book_append_sheet(wb, ws, 'Resumo mensal');
     XLSX.writeFile(wb, 'relatorio-financeiro.xlsx');
   }
+  const showComparison = isVisible(settings, 'relatorios', 'categoryComparison');
   return (
     <div className="space-y-6 print-area">
-      <div className="flex justify-end gap-2 no-print">
-        <Button variant="secondary" size="sm" icon={Download} onClick={exportSummary}>Exportar Excel</Button>
-        <Button variant="secondary" size="sm" icon={FileText} onClick={() => window.print()}>Imprimir / PDF</Button>
-      </div>
-      <Card>
-        <SectionTitle>Receitas vs. Despesas (12 meses)</SectionTitle>
-        <div style={{ width: '100%', height: 280 }}>
-          <ResponsiveContainer>
-            <BarChart data={barData} margin={{ left: -20, right: 4, top: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: 'var(--text-soft)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} width={36} />
-              <Tooltip formatter={(v) => formatBRL(v)} contentStyle={{ borderRadius: 12, border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)', fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Receitas" fill="#5A8F5A" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="Despesas" fill="#B66B6B" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+      <div className="flex items-center justify-between gap-3 flex-wrap no-print">
+        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+          Atualizado em {updatedAt.toLocaleDateString('pt-BR')} às {updatedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" icon={Download} onClick={exportSummary}>Exportar Excel</Button>
+          <Button variant="secondary" size="sm" icon={FileText} onClick={() => window.print()}>Imprimir / PDF</Button>
         </div>
-      </Card>
-      {isVisible(settings, 'relatorios', 'categoryComparison') && (
+      </div>
+      {showComparison ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <CategoryDonut data={categoryComparison.current} title="Gastos por categoria" subtitle="mês atual" />
           <CategoryDonut data={categoryComparison.previous} title="Gastos por categoria" subtitle="mês anterior" />
         </div>
+      ) : (
+        <Card>
+          <EmptyState icon={BarChart3} title="Nada configurado pra mostrar" description='Ative o comparativo por categoria em Configurações → Personalização da interface → Relatórios.' />
+        </Card>
       )}
     </div>
   );
@@ -5016,11 +5069,11 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
       <VisibilitySettingsSection settings={settings} onChangeSettings={onChangeSettings} />
 
       <Card>
-        <SectionTitle>Metas gerais</SectionTitle>
+        <SectionTitle>Meta de economia</SectionTitle>
         <div>
-          <FieldLabel>Meta mensal de economia</FieldLabel>
+          <FieldLabel>Quanto você quer economizar por mês</FieldLabel>
           <CurrencyInput value={settings.monthlySavingsTarget || 0} onChange={(v) => onChangeSettings({ ...settings, monthlySavingsTarget: v })} />
-          <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Usado no card "Meta mensal" do dashboard (receitas − despesas do mês). Deixe 0 para ocultar a meta.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Usado no card "Meta de economia" do dashboard (receitas − despesas do mês). Deixe 0 para ocultar a meta. Isso é diferente da aba Metas, que são objetivos como uma viagem ou reserva de emergência.</p>
         </div>
       </Card>
 
@@ -5655,6 +5708,14 @@ export default function App() {
     setGoals(updated); persist({ goals: updated });
     addToast('Meta criada.');
   }
+  // Edita só nome, valor objetivo, previsão e ícone — current/history continuam sob
+  // responsabilidade de "Adicionar valor" (addGoalFunds), pra não desalinhar o histórico de
+  // aportes com o valor atual.
+  function editGoal(form) {
+    const updated = goals.map((g) => (g.id === form.id ? { ...g, name: form.name, target: form.target, deadline: form.deadline, icon: form.icon } : g));
+    setGoals(updated); persist({ goals: updated });
+    addToast('Meta atualizada.');
+  }
   function deleteGoal(goal) {
     const updated = goals.filter((g) => g.id !== goal.id);
     setGoals(updated); persist({ goals: updated });
@@ -5859,7 +5920,7 @@ export default function App() {
         <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
         {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
 
-        <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 print-area" onScroll={handleContentScroll}>
+        <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
           {search.trim() ? (
             <Card>
               <SectionTitle subtitle={searchTotals}>Resultados para "{search}"</SectionTitle>
@@ -5882,12 +5943,11 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage filterType="all" title="Transações" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
-              {activePage === 'receitas' && <TransactionsPage filterType="receita" title="Receitas" transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} />}
+              {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
               {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
-              {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
+              {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
               {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} settings={settings} />}
               {activePage === 'configuracoes' && (
