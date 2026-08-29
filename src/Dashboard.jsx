@@ -206,14 +206,22 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('pt-BR');
 }
 // Compras parceladas importadas da fatura ANTES do ajuste no fluxo de importação guardavam a
-// parcela como texto solto dentro da descrição (ex: "Pag*Steam (parcela 3/3)"), sem preencher os
-// campos estruturados (installmentGroupId/Index/Count) que a tag de parcela depende. Esse helper
-// extrai isso como fallback, pra esses lançamentos antigos também mostrarem a tag corretamente
-// sem precisar reimportar nada.
+// parcela como texto solto dentro da descrição, em um de dois formatos: "(parcela 3/3)" (o que o
+// app passou a escrever) ou "- Parcela 3/3" / "- 3/3" (o formato bruto que vem do extrato do
+// Nubank, caso tenha ficado assim por algum motivo) — sem preencher os campos estruturados
+// (installmentGroupId/Index/Count) que a tag depende. Esse helper reconhece os dois formatos como
+// fallback, pra esses lançamentos antigos também mostrarem a tag corretamente sem reimportar nada.
 function parseInstallmentFallback(description) {
-  const m = description.match(/\s*\(parcela\s*(\d+)\s*\/\s*(\d+)\)\s*$/i);
-  if (!m) return null;
-  return { clean: description.slice(0, m.index).trim(), index: Number(m[1]), count: Number(m[2]) };
+  const patterns = [
+    /\s*\(parcela\s*(\d+)\s*\/\s*(\d+)\)\s*$/i,
+    /\s*-\s*parcela\s+(\d+)\s*\/\s*(\d+)\s*$/i,
+    /\s*-\s*(\d+)\s*\/\s*(\d+)\s*$/,
+  ];
+  for (const re of patterns) {
+    const m = description.match(re);
+    if (m) return { clean: description.slice(0, m.index).trim(), index: Number(m[1]), count: Number(m[2]) };
+  }
+  return null;
 }
 // Dado um lançamento, devolve { desc, index, count } prontos pra exibir — usa os campos
 // estruturados quando existem (compra parcelada normal) ou o fallback acima (importação antiga).
@@ -2561,7 +2569,7 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
 // esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
 // como um botão pequeno embutido na própria linha.
-function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, onPayInvoice }) {
+function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, onPayInvoice, gradient }) {
   const [showPayModal, setShowPayModal] = useState(false);
   const { invoice, count, isPayable } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
@@ -2589,7 +2597,9 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
       className="w-full flex items-center gap-3 p-3 rounded-xl text-left cursor-pointer transition-colors focus-ring"
       style={{ backgroundColor: 'var(--card)', border: selected ? '2px solid var(--primary)' : '1px solid var(--border)' }}
     >
-      <IconCircle icon={CreditCard} color="var(--invest)" soft="var(--invest-soft)" size={36} />
+      <div className="rounded-xl flex items-center justify-center shrink-0" style={{ width: 36, height: 36, background: gradient }}>
+        <CreditCard size={16} color="#fff" strokeWidth={2.2} />
+      </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
         <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {count} lançamento{count === 1 ? '' : 's'}</p>
@@ -4207,6 +4217,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
               selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
               year={year} month={month}
               onPayInvoice={onPayInvoice}
+              gradient={cardGradients[cards.indexOf(c) % cardGradients.length]}
             />
           ))}
         </div>
