@@ -1305,7 +1305,7 @@ function Popover({ open, onClose, triggerRef, children, width = 'trigger', align
       const panelWidth = width === 'trigger' ? r.width : Math.min(width, vw - margin * 2);
       let left;
       if (width === 'trigger') left = r.left;
-      else if (align === 'center') left = (vw - panelWidth) / 2;
+      else if (align === 'center') left = r.left + r.width / 2 - panelWidth / 2;
       else if (align === 'right') left = r.right - panelWidth;
       else left = r.left;
       if (left + panelWidth > vw - margin) left = vw - margin - panelWidth;
@@ -2601,7 +2601,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
       role="button" tabIndex={0}
       onClick={onToggleSelect}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleSelect(); } }}
-      className="w-full flex items-center gap-3 p-3 rounded-xl text-left cursor-pointer transition-colors focus-ring"
+      className="w-full flex items-center gap-3 p-3 rounded-xl text-left cursor-pointer transition-colors hover:bg-black/[0.03] focus-ring"
       style={{ backgroundColor: 'var(--card)', border: selected ? '2px solid var(--primary)' : '1px solid var(--border)' }}
     >
       <div className="rounded-xl flex items-center justify-center shrink-0" style={{ width: 36, height: 36, background: gradient }}>
@@ -4227,7 +4227,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       </div>
 
       {cards.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2 sm:max-w-xl">
           {visibleCards.map((c) => (
             <CardInvoiceRow
               key={c.id} card={c} transactions={transactions} accounts={accounts}
@@ -4240,7 +4240,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         </div>
       )}
 
-      <div className="relative">
+      <div className="relative sm:max-w-xs">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
       </div>
