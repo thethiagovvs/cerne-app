@@ -42,6 +42,10 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => cached);
+      // Quando já existe versão em cache, devolvemos ela na hora e deixamos a atualização em
+      // segundo plano rodando — mas sem waitUntil, o navegador pode encerrar o service worker
+      // antes do cache.put acima terminar, perdendo a atualização silenciosamente.
+      if (cached) event.waitUntil(networkFetch);
       return cached || networkFetch;
     })
   );
