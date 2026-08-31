@@ -1464,7 +1464,7 @@ function Modal({ title, onClose, children, wide }) {
       >
         <div className="flex items-center justify-between px-6 py-4 sticky top-0 z-10" style={{ backgroundColor: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
           <h3 className="font-display text-base font-semibold" style={{ color: 'var(--text)' }}>{title}</h3>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-black/5 focus-ring">
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-black/5 focus-ring" aria-label="Fechar" title="Fechar">
             <X size={18} color="var(--text-soft)" />
           </button>
         </div>
@@ -1931,10 +1931,11 @@ function Banner({ insight, onDismiss }) {
    DASHBOARD — cartões de indicadores
    ============================================================ */
 
-function computeKPIs(period, customRange, mh, transactions, accounts, goals, caixinhas, monthlySavingsTarget) {
-  let receitas = 0, despesas = 0;
+function computeKPIs(period, customRange, mh, transactions, accounts, cards, goals, caixinhas, monthlySavingsTarget) {
+  let receitas = 0, despesas = 0, periodStart, periodEnd;
   if (period === 'personalizado' && customRange.start && customRange.end) {
-    const filtered = transactions.filter((t) => isRealized(t) && t.date >= customRange.start && t.date <= customRange.end);
+    periodStart = customRange.start; periodEnd = customRange.end;
+    const filtered = transactions.filter((t) => isRealized(t) && t.date >= periodStart && t.date <= periodEnd);
     receitas = filtered.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
     despesas = filtered.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
   } else {
@@ -1942,8 +1943,21 @@ function computeKPIs(period, customRange, mh, transactions, accounts, goals, cai
     const slice = mh.slice(-monthsToTake);
     receitas = slice.reduce((s, m) => s + m.receitas, 0);
     despesas = slice.reduce((s, m) => s + m.despesas, 0);
+    const now = new Date();
+    periodStart = ymd(new Date(now.getFullYear(), now.getMonth() - (monthsToTake - 1), 1));
+    periodEnd = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
   }
   const saldoDisponivel = accounts.reduce((s, a) => s + a.balance, 0);
+  // "Saldo previsto" soma ao saldo atual só o que AINDA NÃO afetou o saldo das contas. Receitas e
+  // despesas comuns já contam aqui só quando "Pago" (isRealized), e nesse caso já foram aplicadas
+  // à conta na hora — somar de novo em cima do saldo atual contaria esse valor duas vezes. A única
+  // parte que realmente ainda não saiu de conta nenhuma são as despesas de cartão cuja fatura
+  // ainda está em aberto (o débito só acontece quando a fatura é paga).
+  const unpaidCardExpenses = transactions
+    .filter((t) => t.type === 'despesa' && t.cardId && t.date >= periodStart && t.date <= periodEnd)
+    .filter((t) => { const card = cards.find((c) => c.id === t.cardId); return card && (!card.paidThroughDate || t.date > card.paidThroughDate); })
+    .reduce((s, t) => s + t.amount, 0);
+  const saldoPrevisto = saldoDisponivel - unpaidCardExpenses;
   const patrimonio = mh.length ? mh[mh.length - 1].patrimonio : saldoDisponivel;
   const economiaAcumulada = caixinhas.reduce((s, c) => s + c.balance, 0) + goals.reduce((s, g) => s + g.current, 0);
   const metaMensalCurrent = mh.length ? thisMonthSaved(mh) : 0;
@@ -1957,7 +1971,7 @@ function computeKPIs(period, customRange, mh, transactions, accounts, goals, cai
     ? { receitas: pctChange(last.receitas, prev.receitas), despesas: pctChange(last.despesas, prev.despesas), patrimonio: pctChange(last.patrimonio, prev.patrimonio) }
     : { receitas: null, despesas: null, patrimonio: null };
 
-  return { receitas, despesas, saldo: receitas - despesas, saldoDisponivel, patrimonio, economiaAcumulada, metaMensal, growth };
+  return { receitas, despesas, saldo: receitas - despesas, saldoDisponivel, saldoPrevisto, patrimonio, economiaAcumulada, metaMensal, growth };
 }
 function thisMonthSaved(mh) {
   const m = mh[mh.length - 1];
@@ -2004,7 +2018,7 @@ function StatCard({ title, value, description, icon: Icon, color, soft, growth, 
   );
 }
 
-function KPIRow({ kpis, settings, accounts }) {
+function KPIRow({ kpis, settings, accounts, caixinhas = [], goals = [] }) {
   const [hideBalance, setHideBalance] = useState(false);
   const metaPercent = kpis.metaMensal.percent;
   const saldoBreakdown = accounts && accounts.length > 0 && (
@@ -2017,11 +2031,25 @@ function KPIRow({ kpis, settings, accounts }) {
       ))}
     </>
   );
+  const totalCaixinhas = caixinhas.reduce((s, c) => s + c.balance, 0);
+  const totalMetas = goals.reduce((s, g) => s + g.current, 0);
+  const economiaBreakdown = (caixinhas.length > 0 || goals.length > 0) && (
+    <>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span style={{ color: 'var(--text-soft)' }}>Em caixinhas (separado de verdade)</span>
+        <span className="tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(totalCaixinhas)}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span style={{ color: 'var(--text-soft)' }}>Em metas (acompanhamento)</span>
+        <span className="tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(totalMetas)}</span>
+      </div>
+    </>
+  );
   const allCards = [
     { key: 'kpiSaldo', title: 'Saldo disponível', value: formatBRL(kpis.saldoDisponivel), description: 'Soma de todas as contas', icon: Wallet, color: 'var(--primary)', soft: 'var(--primary-soft)', expandableLabel: 'Ver saldo por conta', expandableContent: saldoBreakdown, masked: hideBalance, onToggleMask: () => setHideBalance((v) => !v) },
     { key: 'kpiReceitas', title: 'Receitas do período', value: formatBRL(kpis.receitas), description: 'Entradas no período selecionado', icon: TrendingUp, color: 'var(--income)', soft: 'var(--income-soft)', growth: kpis.growth.receitas },
     { key: 'kpiDespesas', title: 'Despesas do período', value: formatBRL(kpis.despesas), description: 'Saídas no período selecionado', icon: TrendingDown, color: 'var(--expense)', soft: 'var(--expense-soft)', growth: kpis.growth.despesas != null ? -kpis.growth.despesas : null },
-    { key: 'kpiEconomia', title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)' },
+    { key: 'kpiEconomia', title: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada), description: 'Em caixinhas + metas', icon: PiggyBank, color: 'var(--goals)', soft: 'var(--goals-soft)', expandableLabel: 'Ver caixinhas x metas', expandableContent: economiaBreakdown },
     { key: 'kpiMeta', title: 'Meta de economia', value: formatBRL(kpis.metaMensal.current), description: kpis.metaMensal.target > 0 ? `${metaPercent.toFixed(0)}% de ${formatBRL(kpis.metaMensal.target)} planejados` : 'defina uma meta em Configurações', icon: Target, color: 'var(--alert)', soft: 'var(--alert-soft)', progressPercent: metaPercent },
     { key: 'kpiPatrimonio', title: 'Patrimônio total', value: formatBRL(kpis.patrimonio), description: 'Contas + investimentos', icon: Landmark, color: 'var(--invest)', soft: 'var(--invest-soft)', growth: kpis.growth.patrimonio },
   ];
@@ -2250,7 +2278,7 @@ function MonthSummaryPanel({ transactions, kpis }) {
     { label: 'Maior despesa', value: maiorDespesa ? formatBRL(maiorDespesa.amount) : '—', sub: maiorDespesa?.description },
     { label: 'Média diária de gastos', value: formatBRL(mediaDiaria) },
     { label: 'Economia acumulada', value: formatBRL(kpis.economiaAcumulada) },
-    { label: 'Saldo previsto (fechamento)', value: formatBRL(kpis.saldoDisponivel + kpis.saldo) },
+    { label: 'Saldo previsto (fechamento)', value: formatBRL(kpis.saldoPrevisto) },
   ];
   return (
     <Card className="animate-fade-up h-fit">
@@ -2884,7 +2912,7 @@ function InsightsSection({ insights }) {
 
 function DashboardPage({ data, actions }) {
   const { settings } = data;
-  const kpis = computeKPIs(data.period, data.customRange, data.monthlyHistory, data.transactions, data.accounts, data.goals, data.caixinhas, data.settings.monthlySavingsTarget);
+  const kpis = computeKPIs(data.period, data.customRange, data.monthlyHistory, data.transactions, data.accounts, data.cards, data.goals, data.caixinhas, data.settings.monthlySavingsTarget);
   const v = (item) => isVisible(settings, 'dashboard', item);
   const allBlocks = ['kpiSaldo', 'kpiReceitas', 'kpiDespesas', 'kpiEconomia', 'kpiMeta', 'kpiPatrimonio', 'evolutionChart', 'categoryDonut', 'recentTransactions', 'monthSummary', 'goalsSection', 'financialCalendar', 'cardsPreview', 'recurringPreview', 'investmentsPreview', 'insights'];
   if (allBlocks.every((b) => !v(b))) {
@@ -2901,7 +2929,7 @@ function DashboardPage({ data, actions }) {
   const showPreviewRow = v('recurringPreview') || v('investmentsPreview');
   return (
     <div className="space-y-6">
-      {showKPIRow && <KPIRow kpis={kpis} settings={settings} accounts={data.accounts} />}
+      {showKPIRow && <KPIRow kpis={kpis} settings={settings} accounts={data.accounts} caixinhas={data.caixinhas} goals={data.goals} />}
       {showChartsRow && (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {v('evolutionChart') && <div className={v('categoryDonut') ? 'lg:col-span-3' : 'lg:col-span-5'}><EvolutionChart data={data.monthlyHistory} /></div>}
@@ -3679,8 +3707,8 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
           <div className="flex items-center justify-between mt-4 no-print">
             <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Página {page} de {totalPages} · {sorted.length} lançamentos</p>
             <div className="flex items-center gap-1">
-              <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }}><ChevronLeft size={16} /></button>
-              <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }}><ChevronRight size={16} /></button>
+              <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }} aria-label="Página anterior" title="Página anterior"><ChevronLeft size={16} /></button>
+              <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="p-2 rounded-lg hover:bg-black/5 disabled:opacity-40" style={{ color: 'var(--text-soft)' }} aria-label="Próxima página" title="Próxima página"><ChevronRight size={16} /></button>
             </div>
           </div>
         )}
@@ -3907,7 +3935,7 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
         <IconCircle icon={Icon} color="var(--invest)" soft="var(--invest-soft)" size={36} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{acc.bank}</p>
-          <Badge color="var(--invest)" soft="var(--invest-soft)">{acc.type}</Badge>
+          <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{acc.type}</p>
         </div>
         <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
       </div>
@@ -4920,7 +4948,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
    PÁGINA: RELATÓRIOS
    ============================================================ */
 
-function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
+function ReportsPage({ monthlyHistory, categoryComparison, transactions, settings }) {
   // A data de atualização é fixada na montagem da página (não muda a cada re-render enquanto o
   // usuário navega dentro dela) — os números em si já são sempre calculados na hora, isso é só
   // uma referência de "quando eu abri esse relatório".
@@ -4933,6 +4961,17 @@ function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
     XLSX.writeFile(wb, 'relatorio-financeiro.xlsx');
   }
   const showComparison = isVisible(settings, 'relatorios', 'categoryComparison');
+  const lastMonth = monthlyHistory[monthlyHistory.length - 1];
+  const savingsRate = lastMonth && lastMonth.receitas > 0 ? ((lastMonth.receitas - lastMonth.despesas) / lastMonth.receitas) * 100 : null;
+  const topExpenses = useMemo(() => {
+    const now = new Date();
+    const startStr = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+    const endStr = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    return transactions
+      .filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= startStr && t.date <= endStr)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+  }, [transactions]);
   return (
     <div className="space-y-6 print-area">
       <div className="flex items-center justify-between gap-3 flex-wrap no-print">
@@ -4944,6 +4983,39 @@ function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
           <Button variant="secondary" size="sm" icon={FileText} onClick={() => window.print()}>Imprimir / PDF</Button>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <Card>
+          <SectionTitle>Taxa de economia</SectionTitle>
+          {savingsRate != null ? (
+            <>
+              <p className="text-2xl font-display font-semibold" style={{ color: savingsRate >= 0 ? 'var(--income)' : 'var(--expense)' }}>{savingsRate.toFixed(0)}%</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Do que entrou este mês, ficou guardado. Receitas − despesas ÷ receitas.</p>
+            </>
+          ) : (
+            <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Sem receitas registradas este mês pra calcular.</p>
+          )}
+        </Card>
+        <Card>
+          <SectionTitle>Maiores despesas do mês</SectionTitle>
+          {topExpenses.length > 0 ? (
+            <div className="space-y-2.5">
+              {topExpenses.map((t) => {
+                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                return (
+                  <div key={t.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate min-w-0 flex-1" style={{ color: 'var(--text)' }}>{t.description || cat.label}</span>
+                    <span className="tabular-nums font-medium shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhuma despesa registrada este mês.</p>
+          )}
+        </Card>
+      </div>
+
       {showComparison ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <CategoryDonut data={categoryComparison.current} title="Gastos por categoria" subtitle="mês atual" />
@@ -4962,9 +5034,9 @@ function ReportsPage({ monthlyHistory, categoryComparison, settings }) {
    PÁGINA: CONFIGURAÇÕES
    ============================================================ */
 
-function ToggleSwitch({ checked, onChange }) {
+function ToggleSwitch({ checked, onChange, label }) {
   return (
-    <button onClick={() => onChange(!checked)} className="w-11 h-6 rounded-full p-0.5 transition-colors focus-ring shrink-0" style={{ backgroundColor: checked ? 'var(--primary)' : 'var(--border)' }}>
+    <button onClick={() => onChange(!checked)} role="switch" aria-checked={checked} aria-label={label} title={label} className="w-11 h-6 rounded-full p-0.5 transition-colors focus-ring shrink-0" style={{ backgroundColor: checked ? 'var(--primary)' : 'var(--border)' }}>
       <div className="w-5 h-5 rounded-full bg-white shadow-sm transition-transform" style={{ transform: checked ? 'translateX(20px)' : 'translateX(0)' }} />
     </button>
   );
@@ -5007,7 +5079,7 @@ function VisibilitySettingsSection({ settings, onChangeSettings }) {
           {activePage.items.map((item) => (
             <div key={item.key} className="flex items-center justify-between gap-3">
               <p className="text-sm min-w-0 flex-1" style={{ color: 'var(--text)' }}>{item.label}</p>
-              <ToggleSwitch checked={isVisible(settings, activePage.key, item.key)} onChange={(v) => toggleItem(activePage.key, item.key, v)} />
+              <ToggleSwitch checked={isVisible(settings, activePage.key, item.key)} onChange={(v) => toggleItem(activePage.key, item.key, v)} label={item.label} />
             </div>
           ))}
         </div>
@@ -5035,7 +5107,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
               <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{settings.theme === 'dark' ? 'Ativado' : 'Desativado'}</p>
             </div>
           </div>
-          <ToggleSwitch checked={settings.theme === 'dark'} onChange={(v) => onChangeSettings({ ...settings, theme: v ? 'dark' : 'light' })} />
+          <ToggleSwitch checked={settings.theme === 'dark'} onChange={(v) => onChangeSettings({ ...settings, theme: v ? 'dark' : 'light' })} label="Modo escuro" />
         </div>
         <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
           <p className="text-sm font-medium mb-1" style={{ color: 'var(--text)' }}>Cor de destaque</p>
@@ -5069,7 +5141,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
             <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Botão flutuante de novo lançamento</p>
             <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Atalho fixo no canto da tela pra criar um lançamento de qualquer aba, sem precisar abrir o menu. Some em telas grandes, onde o menu lateral já fica sempre visível.</p>
           </div>
-          <ToggleSwitch checked={settings.fabEnabled !== false} onChange={(v) => onChangeSettings({ ...settings, fabEnabled: v })} />
+          <ToggleSwitch checked={settings.fabEnabled !== false} onChange={(v) => onChangeSettings({ ...settings, fabEnabled: v })} label="Botão flutuante de novo lançamento" />
         </div>
       </Card>
 
@@ -5097,7 +5169,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
                 <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>{item.label}</p>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{item.desc}</p>
               </div>
-              <ToggleSwitch checked={settings[item.key] !== false} onChange={(v) => onChangeSettings({ ...settings, [item.key]: v })} />
+              <ToggleSwitch checked={settings[item.key] !== false} onChange={(v) => onChangeSettings({ ...settings, [item.key]: v })} label={item.label} />
             </div>
           ))}
         </div>
@@ -5956,7 +6028,7 @@ export default function App() {
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
-              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} settings={settings} />}
+              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} transactions={data.transactions} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
                   settings={settings} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
