@@ -2131,7 +2131,7 @@ function CategoryDonut({ data, title = 'Gastos por categoria', subtitle = 'neste
             >
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
               <span className="flex-1 truncate" style={{ color: 'var(--text)' }}>{entry.name}</span>
-              <span className="tabular-nums font-medium" style={{ color: 'var(--text-soft)' }}>{((entry.value / total) * 100).toFixed(0)}%</span>
+              <span className="tabular-nums font-medium" style={{ color: 'var(--text-soft)' }}>{total > 0 ? ((entry.value / total) * 100).toFixed(0) : 0}%</span>
               <span className="tabular-nums w-20 text-right shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(entry.value)}</span>
             </div>
           ))}
@@ -2170,7 +2170,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                   deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
                 >
                   <div className="flex items-center gap-3 p-2">
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
@@ -2180,7 +2180,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                           </span>
                         )}
                       </div>
-                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{formatDateShortYear(tx.date)}</p>
                     </div>
                     <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
                       {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
@@ -2198,7 +2198,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
               const inst = getInstallmentDisplay(tx);
               return (
                 <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
-                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                  <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
@@ -2208,14 +2208,14 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                         </span>
                       )}
                     </div>
-                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{formatDateShortYear(tx.date)}</p>
                   </div>
                   <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
                     {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
                   </span>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
-                    <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
+                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                    <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                   </div>
                 </div>
               );
@@ -2306,7 +2306,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
   return (
     <Card ref={cardRef} className="animate-fade-up" padding="p-5">
       <div className="flex items-start gap-3 mb-4">
-        <IconCircle icon={Icon} color="var(--primary)" soft="var(--primary-soft)" />
+        <IconCircle icon={Icon} color="var(--primary)" soft="var(--primary-soft)" size={36} />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate" style={{ color: 'var(--text)' }}>{goal.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Previsão: {deadlineLabel}</p>
@@ -2576,25 +2576,32 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
 // esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
 // como um botão pequeno embutido na própria linha.
-function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, onPayInvoice, gradient }) {
+function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, subview, onPayInvoice, gradient }) {
   const [showPayModal, setShowPayModal] = useState(false);
-  const { invoice, count, isPayable } = useMemo(() => {
+  const { cycleInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
-    // lançamentos abaixo já usa. Antes, no mês corrente (offset 0), essa linha calculava a
-    // fatura "em aberto agora" (por data de vencimento), um número diferente do total do mês
-    // sendo exibido sempre que o cartão já tinha fechado o ciclo daquele mês — daí o valor não
-    // bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
-    const items = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
+    // lançamentos usa na subview "Fatura". Antes, no mês corrente (offset 0), essa linha
+    // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
+    // total do mês sendo exibido sempre que o cartão já tinha fechado o ciclo daquele mês — daí
+    // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
+    const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
       && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
-    const invoice = items.reduce((s, t) => s + t.amount, 0);
+    const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
+    // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
+    // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
+    // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
+    // dois números não batem.
+    const monthItems = subview === 'todas'
+      ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
+      : cycleItems;
     // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
     // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
     // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
     // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
     const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
     const isPayable = dueCycle.year === year && dueCycle.month === month;
-    return { invoice, count: items.length, isPayable };
-  }, [card, transactions, year, month]);
+    return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
+  }, [card, transactions, year, month, subview]);
 
   return (
     <div
@@ -2609,18 +2616,18 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
-        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {count} lançamento{count === 1 ? '' : 's'}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
       <div className="text-right shrink-0">
-        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(invoice)}</p>
-        {isPayable && (invoice > 0 ? (
-          <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-[11px] font-medium underline" style={{ color: 'var(--primary)' }}>Pagar fatura</button>
+        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
+        {subview === 'fatura' && isPayable && (cycleInvoice > 0 ? (
+          <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-xs font-medium px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>Pagar fatura</button>
         ) : (
-          <span className="text-[11px] font-medium flex items-center justify-end gap-1" style={{ color: 'var(--income)' }}><Check size={10} /> Em dia</span>
+          <span className="text-xs font-medium px-2.5 py-1 rounded-lg flex items-center justify-end gap-1" style={{ backgroundColor: 'var(--income-soft)', color: 'var(--income)' }}><Check size={10} /> Em dia</span>
         ))}
       </div>
       {showPayModal && (
-        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, invoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
+        <PayInvoiceModal card={card} amount={cycleInvoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, cycleInvoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
       )}
     </div>
   );
@@ -2784,12 +2791,12 @@ function RecurringPreview({ recurring, onSeeAll }) {
           const cat = CATEGORIES[r.category] || CATEGORIES['Outros'];
           return (
             <div key={r.id} className="flex items-center gap-3">
-              <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+              <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</p>
               </div>
-              <span className="text-sm tabular-nums font-medium" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+              <span className="text-sm tabular-nums font-medium" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
             </div>
           );
         })}
@@ -3463,7 +3470,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
         </div>
       )}
 
-      <Card padding="p-4 sm:p-5">
+      <Card>
         <div className="space-y-2 no-print">
           {/* Linha 1: busca + filtros. flex-nowrap de propósito — com flex-wrap, ao aparecer o
               badge de contagem no botão "Filtros" ele deixava de caber ao lado da busca (que
@@ -3854,14 +3861,14 @@ function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
   const [showHistory, setShowHistory] = useState(false);
   const history = caixinha.history || [];
   return (
-    <Card padding="p-4">
+    <Card padding="p-5">
       <div className="flex items-start gap-3 mb-3">
         <IconCircle icon={PiggyBank} color="var(--goals)" soft="var(--goals-soft)" size={36} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{caixinha.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{accountName}</p>
         </div>
-        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--text-soft)" /></button>
+        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
       </div>
       <p className="font-display text-lg font-bold tabular-nums mb-2" style={{ color: 'var(--text)' }}>{formatBRL(caixinha.balance)}</p>
       <UpdateValueControl currentValue={caixinha.balance} onUpdate={(value, note) => onUpdateValue(caixinha, value, note)} />
@@ -3895,10 +3902,10 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
   const isNegative = acc.balance < 0;
   const atRisk = (acc.alertThreshold > 0 && acc.balance <= acc.alertThreshold) || isNegative;
   return (
-    <Card className="animate-fade-up" style={atRisk ? { border: '1px solid var(--expense)' } : undefined}>
-      <div className="flex items-start gap-3 mb-3">
-        <IconCircle icon={Icon} color="var(--invest)" soft="var(--invest-soft)" />
-        <div className="min-w-0 flex-1 pt-0.5">
+    <Card className="animate-fade-up" padding="p-5" style={atRisk ? { border: '1px solid var(--expense)' } : undefined}>
+      <div className="flex items-center gap-3 mb-3">
+        <IconCircle icon={Icon} color="var(--invest)" soft="var(--invest-soft)" size={36} />
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{acc.bank}</p>
           <Badge color="var(--invest)" soft="var(--invest-soft)">{acc.type}</Badge>
         </div>
@@ -4122,14 +4129,14 @@ function BenefitBalance({ label, icon: Icon, value, history, onUpdate }) {
 
 function BenefitCard({ benefit, onUpdate, onDelete }) {
   return (
-    <Card padding="p-4">
+    <Card padding="p-5">
       <div className="flex items-start gap-3 mb-3">
         <IconCircle icon={CreditCard} color="var(--goals)" soft="var(--goals-soft)" size={36} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{benefit.provider}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Vale-benefícios</p>
         </div>
-        <button onClick={() => onDelete(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--text-soft)" /></button>
+        <button onClick={() => onDelete(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
       </div>
       <div className="grid grid-cols-1 gap-3">
         <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} history={benefit.foodHistory} onUpdate={(value, note) => onUpdate(benefit, 'foodBalance', value, note)} />
@@ -4232,7 +4239,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
             <CardInvoiceRow
               key={c.id} card={c} transactions={transactions} accounts={accounts}
               selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
-              year={year} month={month}
+              year={year} month={month} subview={subview}
               onPayInvoice={onPayInvoice}
               gradient={cardGradients[cards.indexOf(c) % cardGradients.length]}
             />
@@ -4326,7 +4333,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 const inst = getInstallmentDisplay(t);
                 return (
                   <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg">
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={34} />
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
@@ -4617,8 +4624,8 @@ function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
                       <td className="py-3 pr-3 tabular-nums font-medium" style={{ color: g >= 0 ? 'var(--income)' : 'var(--expense)' }}>{g >= 0 ? '+' : ''}{gp.toFixed(1)}%</td>
                       <td className="py-3 pr-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => setEditing(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={13} color="var(--text-soft)" /></button>
-                          <button onClick={() => setConfirmDelete(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={13} color="var(--expense)" /></button>
+                          <button onClick={() => setEditing(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                          <button onClick={() => setConfirmDelete(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                         </div>
                       </td>
                     </tr>
@@ -4838,11 +4845,11 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                       deleteConfirm={{ title: 'Excluir despesa recorrente', description: `Tem certeza que deseja excluir "${r.name}" da lista? Os lançamentos futuros dela também serão removidos — os que já venceram continuam no seu histórico. Essa ação não pode ser desfeita.` }}
                     >
                       <div className="flex items-start gap-3 p-3">
-                        <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                        <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
                             <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
-                            <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                            <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
                           </div>
                           <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
                             <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
@@ -4869,7 +4876,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                       className="flex items-center gap-3 py-3 px-1 hover:bg-black/[0.02] rounded-lg"
                       style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
                     >
-                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={38} />
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
                         <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
@@ -4877,7 +4884,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                           {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
                         </div>
                       </div>
-                      <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(r.value)}</span>
+                      <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
                       <button onClick={() => setEditingItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
                       <button onClick={() => setConfirmDeleteItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                     </div>
@@ -5931,7 +5938,7 @@ export default function App() {
                   {filteredForSearch.slice(0, 10).map((tx) => (
                     <div key={tx.id} className="flex items-center justify-between gap-3 text-sm p-2.5 rounded-xl hover:bg-black/[0.02]">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="shrink-0" style={{ color: 'var(--text-soft)' }}>{new Date(tx.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                        <span className="shrink-0" style={{ color: 'var(--text-soft)' }}>{formatDateShortYear(tx.date)}</span>
                         <span className="truncate min-w-0 flex-1" style={{ color: 'var(--text)' }}>{tx.description}</span>
                       </div>
                       <span className="tabular-nums font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{formatBRL(tx.amount)}</span>
