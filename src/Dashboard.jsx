@@ -126,6 +126,12 @@ const GLOBAL_STYLES = `
 @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
 .skeleton { background: linear-gradient(90deg, #EDEAE2 25%, #F7F5EF 37%, #EDEAE2 63%); background-size: 400px 100%; animation: shimmer 1.4s ease-in-out infinite; }
 
+@keyframes shakeError { 10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); } 30%, 50%, 70% { transform: translateX(-4px); } 40%, 60% { transform: translateX(4px); } }
+.animate-shake { animation: shakeError 0.4s cubic-bezier(0.36,0.07,0.19,0.97) both; }
+
+@keyframes fieldFlash { 0%, 100% { box-shadow: 0 0 0 0 rgba(182,107,107,0); } 15%, 45% { box-shadow: 0 0 0 3px rgba(182,107,107,0.35); } }
+.animate-field-flash { animation: fieldFlash 1.1s ease-out both; }
+
 /* Botão flutuante de novo lançamento: ao encolher/expandir (rolagem), gira uma volta
    rápida seguida de uma segunda volta mais lenta (0%→35% cobre os primeiros 360°,
    35%→100% cobre os últimos 360° num intervalo bem maior de tempo). Ao voltar ao
@@ -186,7 +192,7 @@ const CATEGORY_NAMES = Object.keys(CATEGORIES);
 
 const ACCOUNTS_ICONS = { 'Conta Corrente': Wallet, 'Poupança': PiggyBank };
 
-const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Transferência', 'Boleto', 'Vale-benefícios'];
+const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Transferência', 'Boleto', 'Empréstimo / Pix parcelado', 'Vale-benefícios'];
 const STATUS_OPTIONS = ['Pago', 'Pendente'];
 // O rótulo "Pago" não faz muito sentido pra uma receita (você recebe, não paga) — o valor
 // gravado continua sendo 'Pago' (é o que toda a lógica de saldo/fatura usa), só o texto muda.
@@ -2968,17 +2974,30 @@ function DashboardPage({ data, actions }) {
    FORMULÁRIO DE TRANSAÇÃO
    ============================================================ */
 
-function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onClose, onDelete }) {
+function TransactionForm({ initial, accounts, cards, benefits = [], transactions = [], onSave, onClose, onDelete }) {
   const [form, setForm] = useState(initial || {
     type: 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
     paymentMethod: 'Pix', date: new Date().toISOString().slice(0, 10), status: 'Pago',
     isSalary: false, grossSalary: 0, dependents: 0, cardId: null, benefitId: null, benefitType: null,
   });
   const [errors, setErrors] = useState({});
-  // Parcelamento só é oferecido ao criar um lançamento novo (editar uma parcela já existente
-  // edita só aquela ocorrência — não faz sentido reabrir o plano inteiro).
+  const [shakeError, setShakeError] = useState(false);
+  const [flashField, setFlashField] = useState(null);
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [autofillSuggestion, setAutofillSuggestion] = useState(null);
+  const [autofillApplied, setAutofillApplied] = useState(false);
+  const descRef = useRef(null);
+  const salaryRef = useRef(null);
+  const amountRef = useRef(null);
+  const dateRef = useRef(null);
+  const accountRef = useRef(null);
+  // Parcelamento é oferecido tanto ao criar um lançamento novo quanto ao editar um que ainda não
+  // é parcela de um grupo (convertendo uma compra à vista em parcelada). Editar uma parcela que
+  // já existe dentro de um grupo continua editando só aquela ocorrência — não faz sentido reabrir
+  // o plano inteiro por aqui.
   const [installmentEnabled, setInstallmentEnabled] = useState(false);
   const [installmentCount, setInstallmentCount] = useState(2);
+  const [installmentCountText, setInstallmentCountText] = useState('2');
   const [installmentTotal, setInstallmentTotal] = useState(0);
 
   const cltBreakdown = useMemo(
@@ -2993,10 +3012,39 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.isSalary, cltBreakdown?.net]);
 
+  // Autofill: ao digitar a descrição, procura no histórico um lançamento com nome parecido e
+  // sugere a categoria e a forma de pagamento usadas da última vez — só sugestão, o usuário
+  // decide se aplica. Só roda pra lançamento novo, pra não sobrescrever dados de algo que já
+  // existe. Reaproveita o mesmo textSimilarity já usado na detecção de duplicata da importação.
+  useEffect(() => {
+    if (initial || autofillApplied) { setAutofillSuggestion(null); return; }
+    const q = form.description.trim();
+    if (q.length < 3) { setAutofillSuggestion(null); return; }
+    const id = setTimeout(() => {
+      let best = null; let bestScore = 0;
+      transactions.forEach((t) => {
+        if (t.type !== form.type || !t.description) return;
+        const score = textSimilarity(q, t.description);
+        if (score > bestScore) { bestScore = score; best = t; }
+      });
+      setAutofillSuggestion(bestScore >= 0.5 && best && (best.category !== form.category || best.paymentMethod !== form.paymentMethod) ? best : null);
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.description, form.type]);
+
+  function applyAutofill() {
+    if (!autofillSuggestion) return;
+    setForm((f) => ({ ...f, category: autofillSuggestion.category, paymentMethod: autofillSuggestion.paymentMethod }));
+    setAutofillApplied(true);
+    setAutofillSuggestion(null);
+  }
+
   const selectedCard = cards.find((c) => c.id === form.cardId);
   const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
   const perInstallment = installmentCount > 0 ? installmentTotal / installmentCount : 0;
   const isEditingInstallment = !!initial?.installmentGroupId;
+  const canToggleInstallments = !isEditingInstallment;
   const currentInvoiceCycle = useMemo(
     () => (isEditingInstallment && selectedCard ? getCardInvoiceCycle(selectedCard, form.date) : null),
     [isEditingInstallment, selectedCard, form.date]
@@ -3012,16 +3060,44 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
     if (!form.account) e.account = 'Selecione uma conta';
     if (form.isSalary && (!form.grossSalary || form.grossSalary <= 0)) e.grossSalary = 'Informe o salário bruto';
     setErrors(e);
-    return Object.keys(e).length === 0;
+    return e;
   }
 
-  function handleSubmit() {
-    if (!validate()) return;
-    if (installmentEnabled && !initial) {
-      onSave({ ...form, amount: perInstallment, installmentPlan: { count: installmentCount, totalAmount: installmentTotal } });
+  function triggerShake() {
+    setShakeError(true);
+    setTimeout(() => setShakeError(false), 450);
+  }
+
+  function scrollToFirstError(e) {
+    const order = [['description', descRef], ['grossSalary', salaryRef], ['amount', amountRef], ['date', dateRef], ['account', accountRef]];
+    const first = order.find(([key]) => e[key]);
+    if (first && first[1].current) {
+      first[1].current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashField(first[0]);
+      setTimeout(() => setFlashField(null), 1100);
+    }
+  }
+
+  function doSave() {
+    if (installmentEnabled && canToggleInstallments) {
+      const count = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
+      onSave({ ...form, amount: perInstallment, installmentPlan: { count, totalAmount: installmentTotal } });
     } else {
       onSave(form);
     }
+  }
+
+  function handleSubmit() {
+    const e = validate();
+    if (Object.keys(e).length > 0) { triggerShake(); scrollToFirstError(e); return; }
+    // Só checa duplicata em lançamento novo — editar um já existente não é uma inclusão.
+    if (!initial && !duplicateWarning) {
+      const amountToCheck = installmentEnabled ? perInstallment : form.amount;
+      const pool = transactions.map((t) => ({ date: t.date, description: t.description, amount: t.amount, used: false }));
+      const match = findBestDuplicateMatch({ date: form.date, description: form.description, amount: amountToCheck }, pool);
+      if (match) { setDuplicateWarning(match); return; }
+    }
+    doSave();
   }
 
   function selectPaymentSource(v) {
@@ -3065,16 +3141,25 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             É salário (CLT)? Calculamos o líquido estimado com INSS e IRRF.
           </label>
         )}
-        <div>
+        <div ref={descRef} className={flashField === 'description' ? 'rounded-xl animate-field-flash' : ''}>
           <FieldLabel error={errors.description}>Descrição</FieldLabel>
-          <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Supermercado" />
+          <input value={form.description} onChange={(e) => { setForm({ ...form, description: e.target.value }); setAutofillApplied(false); }} className={inputClass} style={inputStyle} placeholder="Ex: Supermercado" />
           {errors.description && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.description}</p>}
+          {autofillSuggestion && (
+            <div className="mt-2 rounded-xl p-3 flex items-center justify-between gap-3 text-xs" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+              <span>Parece com "{autofillSuggestion.description}". Usar {autofillSuggestion.category} · {autofillSuggestion.paymentMethod} de novo?</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button type="button" onClick={applyAutofill} className="font-semibold px-2 py-1 rounded-lg hover:opacity-80">Usar</button>
+                <button type="button" onClick={() => setAutofillSuggestion(null)} className="px-2 py-1 rounded-lg hover:opacity-80"><X size={12} /></button>
+              </div>
+            </div>
+          )}
         </div>
 
         {form.isSalary && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--income-soft)' }}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+              <div ref={salaryRef} className={flashField === 'grossSalary' ? 'rounded-xl animate-field-flash' : ''}>
                 <FieldLabel error={errors.grossSalary}>Salário bruto</FieldLabel>
                 <CurrencyInput value={form.grossSalary} onChange={(v) => setForm({ ...form, grossSalary: v })} />
               </div>
@@ -3117,14 +3202,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
           </div>
         )}
 
-        {installmentEnabled && !initial ? (
+        {installmentEnabled && canToggleInstallments ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+            <div ref={amountRef} className={flashField === 'amount' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
               <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
               {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
             </div>
-            <div>
+            <div ref={dateRef} className={flashField === 'date' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.date}>Data da compra</FieldLabel>
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputClass} style={inputStyle} />
               {errors.date && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.date}</p>}
@@ -3132,7 +3217,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+            <div ref={amountRef} className={flashField === 'amount' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.amount}>Valor</FieldLabel>
               {form.isSalary ? (
                 <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(form.amount)} <span className="ml-1 text-xs">(líquido calculado)</span></div>
@@ -3141,7 +3226,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
               )}
               {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
             </div>
-            <div>
+            <div ref={dateRef} className={flashField === 'date' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.date}>Data</FieldLabel>
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputClass} style={inputStyle} />
               {errors.date && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.date}</p>}
@@ -3156,14 +3241,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
             </Select>
           </div>
           {form.type === 'receita' ? (
-            <div>
+            <div ref={accountRef} className={flashField === 'account' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.account}>Conta</FieldLabel>
               <Select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
               </Select>
             </div>
           ) : (
-            <div>
+            <div ref={accountRef} className={flashField === 'account' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.account}>Como foi pago</FieldLabel>
               <Select
                 value={form.cardId ? `card:${form.cardId}` : form.benefitId ? `benefit:${form.benefitId}:${form.benefitType}` : `account:${form.account}`}
@@ -3192,23 +3277,41 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
         </div>
         {selectedCard && <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>Essa despesa entra na fatura do cartão e só sai da conta quando você pagar a fatura.</p>}
         {selectedBenefit && <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>O valor é descontado automaticamente do saldo desse vale-benefícios ao salvar — sem precisar atualizar na mão.</p>}
-        {form.type === 'despesa' && selectedCard && !initial && (
+        {form.type === 'despesa' && selectedCard && canToggleInstallments && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
             <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
               <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) setInstallmentTotal(form.amount || 0); }} className="w-5 h-5 shrink-0 focus-ring" />
-              Compra parcelada
+              {initial ? 'Converter em compra parcelada' : 'Compra parcelada'}
             </label>
             {installmentEnabled && (
               <>
                 <div>
                   <FieldLabel>Número de parcelas</FieldLabel>
-                  <input type="number" inputMode="numeric" min={2} max={48} value={installmentCount} onChange={(e) => setInstallmentCount(Math.max(2, Math.min(48, Number(e.target.value) || 2)))} className={inputClass} style={inputStyle} />
+                  <input
+                    type="number" inputMode="numeric" min={2} max={48}
+                    value={installmentCountText}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setInstallmentCountText(raw);
+                      const n = Number(raw);
+                      if (raw !== '' && !Number.isNaN(n)) setInstallmentCount(n);
+                    }}
+                    onBlur={() => {
+                      const clamped = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
+                      setInstallmentCount(clamped);
+                      setInstallmentCountText(String(clamped));
+                    }}
+                    className={inputClass} style={inputStyle}
+                  />
                 </div>
                 <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
                   {installmentCount}x de {formatBRL(perInstallment)}
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
-                  Cada parcela vira um lançamento no mês certo, respeitando o fechamento do cartão (dia {selectedCard.closingDay}) — não conta como despesa recorrente. Dá pra antecipar as parcelas que faltam a qualquer momento na página do cartão.
+                  {initial
+                    ? 'Ao salvar, esse lançamento à vista vira essas parcelas novas, respeitando o fechamento do cartão. Não dá pra desfazer sozinho, então confira o valor total antes de salvar.'
+                    : 'Cada parcela vira um lançamento no mês certo, respeitando o fechamento do cartão (dia ' + selectedCard.closingDay + ') — não conta como despesa recorrente. Dá pra antecipar as parcelas que faltam a qualquer momento na página do cartão.'}
                 </p>
               </>
             )}
@@ -3223,15 +3326,24 @@ function TransactionForm({ initial, accounts, cards, benefits = [], onSave, onCl
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <Select value={form.status} disabled={(installmentEnabled && !initial) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && !initial) || !!form.cardId ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={(installmentEnabled && canToggleInstallments) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && canToggleInstallments) || !!form.cardId ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
             </Select>
             {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
           </div>
         </div>
+        {duplicateWarning && (
+          <div className="rounded-xl p-3 text-xs space-y-2" style={{ backgroundColor: 'var(--expense-soft)', color: 'var(--expense)' }}>
+            <p>Isso parece parecido com um lançamento que já existe: <strong>{duplicateWarning.description}</strong>, {formatDateShortYear(duplicateWarning.date)}, {formatBRL(duplicateWarning.amount)}. Quer salvar mesmo assim?</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setDuplicateWarning(null)} className="flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--card)', color: 'var(--text-soft)' }}>Rever lançamento</button>
+              <button type="button" onClick={doSave} className="flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--expense)', color: '#fff' }}>Salvar mesmo assim</button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleSubmit}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
+          <Button onClick={handleSubmit} className={shakeError ? 'animate-shake' : ''}>{initial ? 'Salvar alterações' : 'Adicionar lançamento'}</Button>
         </div>
       </div>
     </Modal>
@@ -3714,8 +3826,8 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
         )}
       </Card>
 
-      {showForm && <TransactionForm accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
-      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} onDelete={(tx) => { onDelete(tx); setEditing(null); }} />}
+      {showForm && <TransactionForm accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
+      {editing && <TransactionForm initial={editing} accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} onSave={(f) => { onEdit(f); setEditing(null); }} onClose={() => setEditing(null)} onDelete={(tx) => { onDelete(tx); setEditing(null); }} />}
       {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} cards={cards} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
       {confirmMarkPaid && (
         <ConfirmModal
@@ -4408,7 +4520,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       )}
       {editingTx && (
         <TransactionForm
-          initial={editingTx} accounts={accounts} cards={cards} benefits={benefits}
+          initial={editingTx} accounts={accounts} cards={cards} benefits={benefits} transactions={transactions}
           onSave={(f) => { onEditTransaction(f); setEditingTx(null); }}
           onClose={() => setEditingTx(null)}
           onDelete={(tx) => { onDeleteTransaction(tx); setEditingTx(null); }}
@@ -5273,6 +5385,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [activePage, setActivePage] = useState('dashboard');
+  const mainRef = useRef(null);
   const [cardsView, setCardsView] = useState('cartoes');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [period, setPeriod] = useState('mes');
@@ -5551,39 +5664,45 @@ export default function App() {
     reader.readAsText(file);
   }
 
-  function goTo(page) { setActivePage(page); window.scrollTo({ top: 0 }); }
+  function goTo(page) { setActivePage(page); if (mainRef.current) mainRef.current.scrollTop = 0; }
   function goToFatura() { setCardsView('fatura'); goTo('cartoes'); }
 
   /* ---- transações ---- */
   // Uma compra parcelada vira N lançamentos de uma vez (um por parcela), cada um datado pra
   // cair na fatura certa (respeitando o fechamento do cartão) — assim o histórico de gastos
-  // por mês fica correto sem precisar de nenhuma lógica especial nos relatórios.
+  // por mês fica correto sem precisar de nenhuma lógica especial nos relatórios. Reaproveitada
+  // tanto por uma compra parcelada nova quanto pela conversão de um lançamento à vista já
+  // existente em parcelado.
+  function generateInstallmentTransactions(form, installmentPlan) {
+    const { count, totalAmount } = installmentPlan;
+    const card = cards.find((c) => c.id === form.cardId);
+    const groupId = uid();
+    const perBase = Math.round((totalAmount / count) * 100) / 100;
+    const lastAmount = Math.round((totalAmount - perBase * (count - 1)) * 100) / 100;
+    const [py, pm, pd] = form.date.split('-').map(Number);
+    const purchaseDate = new Date(py, pm - 1, pd);
+    const rest = { ...form };
+    delete rest.installmentPlan;
+    const newTxs = [];
+    for (let i = 0; i < count; i++) {
+      const amount = i === count - 1 ? lastAmount : perBase;
+      const dueDate = card ? getInstallmentDueDate(card, purchaseDate, i) : new Date(py, pm - 1 + i, pd);
+      newTxs.push({
+        ...rest, id: uid(), amount, date: ymd(dueDate), status: rest.cardId ? 'Pendente' : 'Pago',
+        installmentGroupId: groupId, installmentIndex: i + 1, installmentCount: count,
+      });
+    }
+    return newTxs;
+  }
   function addTransaction(form) {
     if (form.installmentPlan) {
-      const { count, totalAmount } = form.installmentPlan;
-      const card = cards.find((c) => c.id === form.cardId);
-      const groupId = uid();
-      const perBase = Math.round((totalAmount / count) * 100) / 100;
-      const lastAmount = Math.round((totalAmount - perBase * (count - 1)) * 100) / 100;
-      const [py, pm, pd] = form.date.split('-').map(Number);
-      const purchaseDate = new Date(py, pm - 1, pd);
-      const rest = { ...form };
-      delete rest.installmentPlan;
-      const newTxs = [];
-      for (let i = 0; i < count; i++) {
-        const amount = i === count - 1 ? lastAmount : perBase;
-        const dueDate = card ? getInstallmentDueDate(card, purchaseDate, i) : new Date(py, pm - 1 + i, pd);
-        newTxs.push({
-          ...rest, id: uid(), amount, date: ymd(dueDate), status: rest.cardId ? 'Pendente' : 'Pago',
-          installmentGroupId: groupId, installmentIndex: i + 1, installmentCount: count,
-        });
-      }
+      const newTxs = generateInstallmentTransactions(form, form.installmentPlan);
       const updated = [...newTxs, ...transactions];
       let updatedAccounts = accounts;
       newTxs.forEach((t) => { updatedAccounts = reapplyAccountEffect(updatedAccounts, null, t); });
       setTransactions(updated); setAccounts(updatedAccounts);
       persist({ transactions: updated, accounts: updatedAccounts });
-      addToast(`Compra parcelada em ${count}x de ${formatBRL(perBase)} lançada.`);
+      addToast(`Compra parcelada em ${newTxs.length}x de ${formatBRL(newTxs[0].amount)} lançada.`);
       return;
     }
     const newTx = { ...form, id: uid() };
@@ -5594,14 +5713,45 @@ export default function App() {
     persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
     addToast('Lançamento adicionado com sucesso.');
   }
-  function editTransaction(form, toastMessage = 'Lançamento atualizado.') {
+  function editTransaction(form, toastMessage) {
     const oldTx = transactions.find((t) => t.id === form.id);
+    if (form.installmentPlan) {
+      const installmentPlan = form.installmentPlan;
+      const rest = { ...form };
+      const newTxs = generateInstallmentTransactions(rest, installmentPlan);
+      const updated = [...newTxs, ...transactions.filter((t) => t.id !== form.id)];
+      let updatedAccounts = oldTx ? reapplyAccountEffect(accounts, oldTx, null) : accounts;
+      newTxs.forEach((t) => { updatedAccounts = reapplyAccountEffect(updatedAccounts, null, t); });
+      const updatedBenefits = oldTx ? reapplyBenefitEffect(benefits, oldTx, null) : benefits;
+      setTransactions(updated); setAccounts(updatedAccounts); setBenefits(updatedBenefits);
+      persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
+      addToast(`Convertido em ${newTxs.length}x de ${formatBRL(newTxs[0].amount)}.`);
+      return;
+    }
     const updated = transactions.map((t) => (t.id === form.id ? form : t));
     const updatedAccounts = reapplyAccountEffect(accounts, oldTx, form);
     const updatedBenefits = reapplyBenefitEffect(benefits, oldTx, form);
     setTransactions(updated); setAccounts(updatedAccounts); setBenefits(updatedBenefits);
     persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
-    addToast(toastMessage);
+    // Quando a forma de pagamento muda de um jeito que passa a afetar (ou deixa de afetar) o
+    // saldo de uma conta — por exemplo, de cartão de crédito (sem efeito imediato) pra Pix/débito
+    // (desconta na hora), ou o contrário — avisamos especificamente, já que é um efeito que o
+    // usuário pode não estar esperando ao só trocar a forma de pagamento.
+    let message = toastMessage;
+    if (!message && oldTx) {
+      const oldEffect = transactionBalanceEffect(oldTx);
+      const newEffect = transactionBalanceEffect(form);
+      if (oldEffect === 0 && newEffect !== 0) {
+        const acc = accounts.find((a) => a.id === form.account);
+        message = `Lançamento atualizado. ${formatBRL(Math.abs(newEffect))} agora desconta do saldo${acc ? ` de ${acc.bank}` : ''}.`;
+      } else if (oldEffect !== 0 && newEffect === 0) {
+        const acc = accounts.find((a) => a.id === oldTx.account);
+        message = `Lançamento atualizado. ${formatBRL(Math.abs(oldEffect))} foi devolvido ao saldo${acc ? ` de ${acc.bank}` : ''}.`;
+      } else if (oldTx.account !== form.account && (oldEffect !== 0 || newEffect !== 0)) {
+        message = 'Lançamento atualizado. O saldo das contas envolvidas foi ajustado.';
+      }
+    }
+    addToast(message || 'Lançamento atualizado.');
   }
   // Marca um lançamento pendente (débito agendado, por exemplo) como pago — reaproveita a mesma
   // lógica de saldo do editTransaction, então o valor desconta da conta na hora certa.
@@ -5999,7 +6149,7 @@ export default function App() {
         <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
         {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
 
-        <main className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
           {search.trim() ? (
             <Card>
               <SectionTitle subtitle={searchTotals}>Resultados para "{search}"</SectionTitle>
@@ -6044,7 +6194,7 @@ export default function App() {
       </div>
 
       {modal?.type === 'newTransaction' && (
-        <TransactionForm accounts={accounts} cards={cards} benefits={benefits} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+        <TransactionForm accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
       )}
       {syncConflict && (
         <SyncConflictModal date={syncConflict.date} onUseRemote={resolveSyncUseRemote} onKeepLocal={resolveSyncKeepLocal} />
