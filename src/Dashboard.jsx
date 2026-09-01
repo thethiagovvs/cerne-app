@@ -2626,16 +2626,6 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
     // total do mês sendo exibido sempre que o cartão já tinha fechado o ciclo daquele mês — daí
     // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
-    const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
-      && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
-    const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
-    // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
-    // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
-    // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
-    // dois números não batem.
-    const monthItems = subview === 'todas'
-      ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
-      : cycleItems;
     // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a que contém a
     // data de hoje) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
     // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
@@ -2645,6 +2635,23 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // pagável no mês errado.
     const todayCycle = getCardInvoiceCycle(card, ymd(new Date()));
     const isPayable = todayCycle.year === year && todayCycle.month === month;
+    // Mesmo filtro de paidThroughDate usado em computeCardInvoice, aplicado só no ciclo
+    // atualmente em aberto (isPayable) — senão essa linha soma de novo lançamentos já cobertos
+    // por um pagamento anterior, e o valor não bate com o card de "Meus cartões" pro mesmo
+    // cartão. Em ciclos passados (histórico) não filtra, igual ao modo histórico de
+    // CreditCardVisual: o total do mês deve mostrar o valor real da fatura, pago ou não.
+    const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
+      && (!isPayable || !card.paidThroughDate || t.date > card.paidThroughDate)
+      && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
+    const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
+    // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
+    // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
+    // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
+    // dois números não batem.
+    const monthItems = subview === 'todas'
+      ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month)
+          && (!isPayable || !card.paidThroughDate || t.date > card.paidThroughDate))
+      : cycleItems;
     return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
   }, [card, transactions, year, month, subview]);
 
@@ -4385,6 +4392,14 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       if (!card) return false;
       const cycle = getCardInvoiceCycle(card, t.date);
       if (cycle.year !== year || cycle.month !== month) return false;
+      // Mesmo filtro de paidThroughDate usado em computeCardInvoice, aplicado só quando o mês
+      // navegado é o ciclo ATUALMENTE em aberto — senão essa lista soma de novo lançamentos que
+      // já foram cobertos por um pagamento anterior, e o total daqui não bate com "Meus cartões"
+      // pro mesmo cartão no mesmo mês. Em ciclos passados (histórico) não filtra: o total do mês
+      // deve mostrar o valor real da fatura, pago ou não.
+      const todayCycle = getCardInvoiceCycle(card, ymd(new Date()));
+      const isCurrentOpenCycle = todayCycle.year === year && todayCycle.month === month;
+      if (isCurrentOpenCycle && card.paidThroughDate && t.date <= card.paidThroughDate) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         if (!t.description.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q)) return false;
