@@ -2984,8 +2984,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const [shakeError, setShakeError] = useState(false);
   const [flashField, setFlashField] = useState(null);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
-  const [autofillSuggestion, setAutofillSuggestion] = useState(null);
-  const [autofillApplied, setAutofillApplied] = useState(false);
+  const [autofillNotice, setAutofillNotice] = useState(null);
+  const [sessionPatternNotice, setSessionPatternNotice] = useState(null);
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [paymentTouched, setPaymentTouched] = useState(false);
   const descRef = useRef(null);
   const salaryRef = useRef(null);
   const amountRef = useRef(null);
@@ -3012,33 +3014,72 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.isSalary, cltBreakdown?.net]);
 
-  // Autofill: ao digitar a descrição, procura no histórico um lançamento com nome parecido e
-  // sugere a categoria e a forma de pagamento usadas da última vez — só sugestão, o usuário
-  // decide se aplica. Só roda pra lançamento novo, pra não sobrescrever dados de algo que já
-  // existe. Reaproveita o mesmo textSimilarity já usado na detecção de duplicata da importação.
+  // "Inércia de sessão": quando os últimos lançamentos criados foram todos na mesma forma de
+  // pagamento (ex: lançando um extrato inteiro de um cartão, um por um), presume que o próximo
+  // segue o mesmo padrão e já pré-seleciona assim que o formulário abre, sem precisar digitar
+  // nada. Roda só uma vez, na criação de um lançamento novo — o autofill por nome parecido (mais
+  // específico) ainda pode sobrescrever isso depois, já que essa presunção não marca o campo
+  // como "tocado" pelo usuário.
   useEffect(() => {
-    if (initial || autofillApplied) { setAutofillSuggestion(null); return; }
+    if (initial) return;
+    function paymentSignature(t) {
+      if (t.cardId) return `card:${t.cardId}`;
+      if (t.benefitId) return `benefit:${t.benefitId}`;
+      return `account:${t.account}:${t.paymentMethod}`;
+    }
+    const recent = transactions.filter((t) => t.type === form.type).slice(0, 3);
+    if (recent.length < 3) return;
+    const sig = paymentSignature(recent[0]);
+    if (!recent.every((t) => paymentSignature(t) === sig)) return;
+    const last = recent[0];
+    setForm((f) => ({
+      ...f,
+      category: f.category,
+      paymentMethod: last.paymentMethod,
+      account: last.account || f.account,
+      cardId: last.cardId ?? null,
+      benefitId: last.benefitId ?? null,
+      benefitType: last.benefitType ?? null,
+    }));
+    const card = cards.find((c) => c.id === last.cardId);
+    const account = accounts.find((a) => a.id === last.account);
+    const label = card ? card.bank : account ? account.bank : last.paymentMethod;
+    setSessionPatternNotice(`Seus últimos lançamentos foram em ${label} — deixei pré-selecionado, é só trocar se for diferente desta vez.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Autofill: ao digitar a descrição, procura no histórico um lançamento com nome parecido e
+  // preenche sozinho a categoria e a forma de pagamento usadas da última vez. Reaproveita o
+  // mesmo textSimilarity já usado na detecção de duplicata da importação.
+  useEffect(() => {
+    if (initial || (categoryTouched && paymentTouched)) { setAutofillNotice(null); return; }
     const q = form.description.trim();
-    if (q.length < 3) { setAutofillSuggestion(null); return; }
+    if (q.length < 3) { setAutofillNotice(null); return; }
     const id = setTimeout(() => {
       let best = null; let bestScore = 0;
       transactions.forEach((t) => {
-        if (t.type !== form.type || !t.description) return;
+        if (t.type !== form.type || !t.description || t.description.trim().toLowerCase() === q.toLowerCase()) return;
         const score = textSimilarity(q, t.description);
         if (score > bestScore) { bestScore = score; best = t; }
       });
-      setAutofillSuggestion(bestScore >= 0.5 && best && (best.category !== form.category || best.paymentMethod !== form.paymentMethod) ? best : null);
+      if (bestScore < 0.5 || !best) { setAutofillNotice(null); return; }
+      if (!paymentTouched) setSessionPatternNotice(null);
+      setForm((f) => ({
+        ...f,
+        category: categoryTouched ? f.category : best.category,
+        paymentMethod: paymentTouched ? f.paymentMethod : best.paymentMethod,
+        account: paymentTouched ? f.account : (best.account || f.account),
+        cardId: paymentTouched ? f.cardId : (best.cardId ?? null),
+        benefitId: paymentTouched ? f.benefitId : (best.benefitId ?? null),
+        benefitType: paymentTouched ? f.benefitType : (best.benefitType ?? null),
+      }));
+      const filledWhat = !categoryTouched && !paymentTouched ? 'categoria e forma de pagamento'
+        : !categoryTouched ? 'categoria' : !paymentTouched ? 'forma de pagamento' : null;
+      setAutofillNotice(filledWhat ? `${filledWhat} preenchida com base em "${best.description}"` : null);
     }, 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.description, form.type]);
-
-  function applyAutofill() {
-    if (!autofillSuggestion) return;
-    setForm((f) => ({ ...f, category: autofillSuggestion.category, paymentMethod: autofillSuggestion.paymentMethod }));
-    setAutofillApplied(true);
-    setAutofillSuggestion(null);
-  }
+  }, [form.description, form.type, categoryTouched, paymentTouched]);
 
   const selectedCard = cards.find((c) => c.id === form.cardId);
   const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
@@ -3101,6 +3142,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   }
 
   function selectPaymentSource(v) {
+    setPaymentTouched(true);
     if (v.startsWith('account:')) {
       const accountId = v.slice(8);
       setForm({ ...form, account: accountId, cardId: null, benefitId: null, benefitType: null, status: form.status === 'Pendente' && form.cardId ? 'Pago' : form.status });
@@ -3143,17 +3185,9 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
         )}
         <div ref={descRef} className={flashField === 'description' ? 'rounded-xl animate-field-flash' : ''}>
           <FieldLabel error={errors.description}>Descrição</FieldLabel>
-          <input value={form.description} onChange={(e) => { setForm({ ...form, description: e.target.value }); setAutofillApplied(false); }} className={inputClass} style={inputStyle} placeholder="Ex: Supermercado" />
+          <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Supermercado" />
           {errors.description && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.description}</p>}
-          {autofillSuggestion && (
-            <div className="mt-2 rounded-xl p-3 flex items-center justify-between gap-3 text-xs" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-              <span>Parece com "{autofillSuggestion.description}". Usar {autofillSuggestion.category} · {autofillSuggestion.paymentMethod} de novo?</span>
-              <div className="flex items-center gap-1 shrink-0">
-                <button type="button" onClick={applyAutofill} className="font-semibold px-2 py-1 rounded-lg hover:opacity-80">Usar</button>
-                <button type="button" onClick={() => setAutofillSuggestion(null)} className="px-2 py-1 rounded-lg hover:opacity-80"><X size={12} /></button>
-              </div>
-            </div>
-          )}
+          {autofillNotice && <p className="text-xs mt-1.5" style={{ color: 'var(--primary)' }}>{autofillNotice}</p>}
         </div>
 
         {form.isSalary && (
@@ -3236,14 +3270,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <FieldLabel>Categoria</FieldLabel>
-            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            <Select value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); setCategoryTouched(true); }} className={inputClass} style={inputStyle}>
               {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </div>
           {form.type === 'receita' ? (
             <div ref={accountRef} className={flashField === 'account' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.account}>Conta</FieldLabel>
-              <Select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className={inputClass} style={inputStyle}>
+              <Select value={form.account} onChange={(e) => { setForm({ ...form, account: e.target.value }); setPaymentTouched(true); }} className={inputClass} style={inputStyle}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
               </Select>
             </div>
@@ -3272,6 +3306,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
                   </optgroup>
                 )}
               </Select>
+              {sessionPatternNotice && !paymentTouched && <p className="text-xs mt-1.5" style={{ color: 'var(--primary)' }}>{sessionPatternNotice}</p>}
             </div>
           )}
         </div>
