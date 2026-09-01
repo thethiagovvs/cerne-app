@@ -519,8 +519,16 @@ function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
   return ymd(new Date(prevRef.getFullYear(), prevRef.getMonth(), Math.min(card.closingDay, daysInMonth(prevRef.getFullYear(), prevRef.getMonth()))));
 }
 
+// A fatura "atual" (aberta) é o ciclo em que a data de referência (hoje, por padrão) cai — a
+// MESMA lógica de ciclo usada na aba "Fatura mensal" (getCardInvoiceCycle), pra que os dois
+// números sempre batam quando estão olhando pro mesmo mês. Antes o corte usado aqui era
+// getNextCardDueDate (o próximo vencimento cronológico a partir de hoje), que podia ficar
+// "preso" no vencimento de uma fatura JÁ paga se esse vencimento ainda não tivesse passado —
+// mostrando um valor bem menor que o ciclo aberto de verdade (o que a aba "Meus cartões"
+// exibia bem diferente do que "Fatura mensal" mostrava pro mesmo cartão no mesmo mês).
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
-  const cutoff = ymd(getNextCardDueDate(card, referenceDate));
+  const cycle = getCardInvoiceCycle(card, ymd(referenceDate));
+  const cutoff = ymd(new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month))));
   return transactions
     .filter((t) => t.cardId === card.id && t.type === 'despesa'
       && (!card.paidThroughDate || t.date > card.paidThroughDate)
@@ -2628,12 +2636,15 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     const monthItems = subview === 'todas'
       ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
       : cycleItems;
-    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
-    // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
+    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a que contém a
+    // data de hoje) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
     // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
-    // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
-    const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
-    const isPayable = dueCycle.year === year && dueCycle.month === month;
+    // enquanto outro cartão ainda está com a fatura aberta no mês corrente. Usa o ciclo de hoje
+    // diretamente (não o ciclo do próximo vencimento) — senão, se o vencimento da fatura anterior
+    // (já paga) ainda não tiver passado cronologicamente, ele "ganhava" de volta o rótulo de
+    // pagável no mês errado.
+    const todayCycle = getCardInvoiceCycle(card, ymd(new Date()));
+    const isPayable = todayCycle.year === year && todayCycle.month === month;
     return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
   }, [card, transactions, year, month, subview]);
 
@@ -5890,7 +5901,12 @@ export default function App() {
   // (útil pra quem paga por fora do que é acompanhado no dashboard).
   function payCardInvoice(card, amount, accountId) {
     const today = new Date().toISOString().slice(0, 10);
-    const cutoff = ymd(getNextCardDueDate(card));
+    // Mesmo corte usado em computeCardInvoice (fim do ciclo aberto), não a data de hoje nem o
+    // próximo vencimento cronológico — assim o que fica marcado como "coberto" aqui é exatamente
+    // o que a fatura atual soma, e paidThroughDate reflete o fechamento real do ciclo pago, não o
+    // dia em que a pessoa clicou em pagar.
+    const cycle = getCardInvoiceCycle(card, today);
+    const cutoff = ymd(new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month))));
     // Todo lançamento no crédito coberto por este pagamento (dentro da janela que estava em
     // aberto) passa de Pendente para Pago — é isso que faz o status refletir "fatura paga" nas
     // abas de Transações e Fatura mensal, sem mudar o cálculo da fatura em si (que já usava
@@ -5906,7 +5922,7 @@ export default function App() {
       account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
       isInvoicePayment: true,
     };
-    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: today } : c));
+    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: cutoff } : c));
     setCards(updatedCards);
     if (accountId) {
       const updatedTransactions = [newTx, ...coveredTransactions];
