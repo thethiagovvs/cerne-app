@@ -4638,7 +4638,6 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
         <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} />
       ) : (
         <>
-          <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>}>Seus cartões</SectionTitle>
           <div className="flex justify-center">
             <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
           </div>
@@ -4646,6 +4645,9 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
             {cards.map((c, i) => (
               <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} viewedCycle={viewedCycle} />
             ))}
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>
           </div>
 
           {isVisible(settings, 'cartoes', 'beneficios') && (
