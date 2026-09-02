@@ -3604,8 +3604,13 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
   const pageData = sorted.slice((page - 1) * pageSize, page * pageSize);
-  const totalReceitas = filtered.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
-  const totalDespesas = filtered.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
+  const todayStr = ymd(new Date());
+  const realized = filtered.filter((t) => t.date <= todayStr);
+  const futureFiltered = filtered.filter((t) => t.date > todayStr);
+  const totalReceitas = realized.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
+  const totalDespesas = realized.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
+  const futureDespesasTotal = futureFiltered.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
+  const futureReceitasTotal = futureFiltered.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
 
   function handleSort(key) {
     setSortConfig((prev) => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
@@ -3668,8 +3673,8 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
       )}
       {isVisible(settings, 'transacoes', 'statCards') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {typeFilter !== 'receita' && <StatCard title="Total de despesas" value={formatBRL(totalDespesas)} description="No filtro atual" icon={TrendingDown} color="var(--expense)" soft="var(--expense-soft)" />}
-          {typeFilter !== 'despesa' && <StatCard title="Total de receitas" value={formatBRL(totalReceitas)} description="No filtro atual" icon={TrendingUp} color="var(--income)" soft="var(--income-soft)" />}
+          {typeFilter !== 'receita' && <StatCard title="Total de despesas" value={formatBRL(totalDespesas)} description={futureDespesasTotal > 0 ? `Já vencido · +${formatBRL(futureDespesasTotal)} a vencer` : 'Já vencido, no filtro atual'} icon={TrendingDown} color="var(--expense)" soft="var(--expense-soft)" />}
+          {typeFilter !== 'despesa' && <StatCard title="Total de receitas" value={formatBRL(totalReceitas)} description={futureReceitasTotal > 0 ? `Já recebido · +${formatBRL(futureReceitasTotal)} a receber` : 'Já recebido, no filtro atual'} icon={TrendingUp} color="var(--income)" soft="var(--income-soft)" />}
         </div>
       )}
 
