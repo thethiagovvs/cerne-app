@@ -542,12 +542,16 @@ function snapToClosingBoundary(card, dateStr) {
   return ymd(closing);
 }
 
+// Fatura atual = tudo que ainda está Pendente neste cartão, até o fechamento do ciclo em aberto.
+// Importante: não filtra mais por paidThroughDate (só data). Se filtrasse por data, pagar a
+// fatura ADIANTADO quebraria o app — a referência do pagamento iria pro fechamento (no futuro),
+// e um lançamento novo, feito hoje, cairia ANTES dessa referência e pareceria "já coberto" por
+// aquele pagamento, sumindo da fatura atual. Usando o status (que só vira 'Pago' quando a fatura
+// é realmente paga), um lançamento novo sempre entra na conta, não importa quando foi criado.
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
   const cutoff = ymd(getOpenInvoiceClosingDate(card, referenceDate));
   return transactions
-    .filter((t) => t.cardId === card.id && t.type === 'despesa'
-      && (!card.paidThroughDate || t.date > card.paidThroughDate)
-      && t.date <= cutoff)
+    .filter((t) => t.cardId === card.id && t.type === 'despesa' && t.status === 'Pendente' && t.date <= cutoff)
     .reduce((s, t) => s + t.amount, 0);
 }
 
@@ -4593,6 +4597,19 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const refDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + monthOffset);
+    return d;
+  }, [monthOffset]);
+  const monthLabel = refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  // No mês atual (offset 0) não passamos viewedCycle: o card mostra a fatura REAL em aberto
+  // agora (com pagar fatura, antecipar parcelas etc). Navegando pra outro mês, viewedCycle entra
+  // e o card vira uma visão histórica só de consulta — total gasto naquele ciclo, sem ações que
+  // só fazem sentido pro "agora".
+  const viewedCycle = monthOffset === 0 ? null : { year: refDate.getFullYear(), month: refDate.getMonth(), label: monthLabel };
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl w-fit max-w-full" style={{ backgroundColor: 'var(--bg)' }}>
@@ -4617,9 +4634,12 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       ) : (
         <>
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>}>Seus cartões</SectionTitle>
+          <div className="flex justify-center">
+            <MonthNavigator label={capitalizeFirst(monthLabel)} monthOffset={monthOffset} onPrev={() => setMonthOffset((m) => m - 1)} onNext={() => setMonthOffset((m) => m + 1)} onToday={() => setMonthOffset(0)} />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
             {cards.map((c, i) => (
-              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
+              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} viewedCycle={viewedCycle} />
             ))}
           </div>
 
@@ -5119,11 +5139,12 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
    PÁGINA: RELATÓRIOS
    ============================================================ */
 
-function ReportsPage({ monthlyHistory, categoryComparison, transactions, settings }) {
+function ReportsPage({ monthlyHistory, transactions, settings }) {
   // A data de atualização é fixada na montagem da página (não muda a cada re-render enquanto o
   // usuário navega dentro dela) — os números em si já são sempre calculados na hora, isso é só
   // uma referência de "quando eu abri esse relatório".
   const updatedAt = useMemo(() => new Date(), []);
+  const [comparisonOffset, setComparisonOffset] = useState(0);
   function exportSummary() {
     const rows = monthlyHistory.map((m) => ({ Mês: m.month, Receitas: m.receitas, Despesas: m.despesas, Saldo: m.receitas - m.despesas, Patrimônio: m.patrimonio }));
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -5143,6 +5164,21 @@ function ReportsPage({ monthlyHistory, categoryComparison, transactions, setting
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
   }, [transactions]);
+  // Comparativo navegável: em vez de travado em "mês atual x anterior", dá pra andar pelo
+  // histórico e comparar qualquer mês com o anterior a ele — útil pra acompanhar tendência ao
+  // longo do tempo, não só o instantâneo de agora. categoryComparison (usado pelos insights do
+  // Dashboard) continua fixo em mês atual x anterior, esse cálculo aqui é independente.
+  const comparisonRef = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + comparisonOffset);
+    return d;
+  }, [comparisonOffset]);
+  const comparisonMonthLabel = capitalizeFirst(comparisonRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+  const prevRef = useMemo(() => new Date(comparisonRef.getFullYear(), comparisonRef.getMonth() - 1, 1), [comparisonRef]);
+  const prevMonthLabel = capitalizeFirst(prevRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+  const comparisonCurrent = useMemo(() => computeCategoryTotals(transactions, comparisonRef.getFullYear(), comparisonRef.getMonth()), [transactions, comparisonRef]);
+  const comparisonPrevious = useMemo(() => computeCategoryTotals(transactions, prevRef.getFullYear(), prevRef.getMonth()), [transactions, prevRef]);
   return (
     <div className="space-y-6 print-area">
       <div className="flex items-center justify-between gap-3 flex-wrap no-print">
@@ -5188,10 +5224,15 @@ function ReportsPage({ monthlyHistory, categoryComparison, transactions, setting
       </div>
 
       {showComparison ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <CategoryDonut data={categoryComparison.current} title="Gastos por categoria" subtitle="mês atual" />
-          <CategoryDonut data={categoryComparison.previous} title="Gastos por categoria" subtitle="mês anterior" />
-        </div>
+        <>
+          <div className="flex justify-center">
+            <MonthNavigator label={comparisonMonthLabel} monthOffset={comparisonOffset} onPrev={() => setComparisonOffset((m) => m - 1)} onNext={() => setComparisonOffset((m) => m + 1)} onToday={() => setComparisonOffset(0)} />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CategoryDonut data={comparisonCurrent} title="Gastos por categoria" subtitle={comparisonMonthLabel} />
+            <CategoryDonut data={comparisonPrevious} title="Gastos por categoria" subtitle={prevMonthLabel} />
+          </div>
+        </>
       ) : (
         <Card>
           <EmptyState icon={BarChart3} title="Nada configurado pra mostrar" description='Ative o comparativo por categoria em Configurações → Personalização da interface → Relatórios.' />
@@ -5923,13 +5964,14 @@ export default function App() {
   function payCardInvoice(card, amount, accountId) {
     const today = new Date().toISOString().slice(0, 10);
     const cutoff = ymd(getOpenInvoiceClosingDate(card));
-    // Todo lançamento no crédito coberto por este pagamento (dentro da janela que estava em
-    // aberto) passa de Pendente para Pago — é isso que faz o status refletir "fatura paga" nas
-    // abas de Transações e Fatura mensal, sem mudar o cálculo da fatura em si (que já usava
-    // paidThroughDate/cutoff, não o status).
+    // Todo lançamento Pendente neste cartão até o fechamento do ciclo em aberto passa a Pago —
+    // é isso que faz o status refletir "fatura paga" nas abas de Transações e Fatura mensal.
+    // Vai só por status, não mais por data/paidThroughDate: se o pagamento fosse adiantado (antes
+    // do fechamento do ciclo), filtrar por data faria um lançamento futuro pendente escapar da
+    // cobertura por pura coincidência de já ter passado da referência salva — status é sempre
+    // exato, cobre exatamente o que ainda estava em aberto nesse ciclo, nem mais nem menos.
     const coveredTransactions = transactions.map((t) => (
-      t.cardId === card.id && t.type === 'despesa'
-        && (!card.paidThroughDate || t.date > card.paidThroughDate) && t.date <= cutoff
+      t.cardId === card.id && t.type === 'despesa' && t.status === 'Pendente' && t.date <= cutoff
         ? { ...t, status: 'Pago' }
         : t
     ));
@@ -5938,6 +5980,8 @@ export default function App() {
       account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
       isInvoicePayment: true,
     };
+    // paidThroughDate agora é só informativa (mostrada como "Fatura paga até X" em Meus
+    // Cartões) — o que realmente conta como coberto é o status de cada lançamento, acima.
     const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: cutoff } : c));
     setCards(updatedCards);
     if (accountId) {
@@ -6245,7 +6289,7 @@ export default function App() {
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
-              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} categoryComparison={data.categoryComparison} transactions={data.transactions} settings={settings} />}
+              {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} transactions={data.transactions} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
                   settings={settings} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
