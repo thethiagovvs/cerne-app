@@ -2690,7 +2690,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
   );
 }
 
-function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onFixInvoiceReference, onEdit, onDelete, viewedCycle }) {
+function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onEdit, onDelete, viewedCycle }) {
   // viewedCycle: opcional { year, month, label } — quando presente (navegação por mês na aba
   // Fatura), mostra o total da fatura daquele ciclo específico, não necessariamente a fatura
   // real em aberto agora. Nesse modo a visualização fica mais enxuta: pagar fatura, antecipar
@@ -2725,7 +2725,6 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   }, [card.id, transactions, openClosing]);
   const futureTotal = futureInstallments.reduce((s, t) => s + t.amount, 0);
   const pendingInvoiceCount = useMemo(() => transactions.filter((t) => t.cardId === card.id && t.status === 'Pendente').length, [transactions, card.id]);
-  const referenceMisaligned = card.paidThroughDate && snapToClosingBoundary(card, card.paidThroughDate) !== card.paidThroughDate;
   return (
     <div className="rounded-2xl p-5 text-white shadow-soft-lg" style={{ background: gradient }}>
       <div className="flex items-start justify-between mb-6">
@@ -2776,11 +2775,6 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
           </div>
           {card.paidThroughDate && (
             <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
-          )}
-          {referenceMisaligned && onFixInvoiceReference && (
-            <button onClick={() => onFixInvoiceReference(card)} className="w-full mt-2 rounded-lg px-2.5 py-2 text-[11px] text-left" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
-              A fatura atual mostrada aqui pode não bater com a Fatura mensal, de um pagamento antigo. Toque pra corrigir a referência.
-            </button>
           )}
           {futureInstallments.length > 0 && onAdvanceInstallments && (
             <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
@@ -4595,7 +4589,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, onFixInvoiceReference, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
@@ -4625,7 +4619,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>}>Seus cartões</SectionTitle>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
             {cards.map((c, i) => (
-              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onFixInvoiceReference={onFixInvoiceReference} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
+              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
             ))}
           </div>
 
@@ -5508,7 +5502,15 @@ export default function App() {
   function applyLoadedData(loaded) {
     setTransactions(loaded.transactions || buildInitialTransactions());
     setAccounts(loaded.accounts || initialAccounts);
-    setCards(loaded.cards || initialCards);
+    // "Encaixa" silenciosamente a referência de fatura paga de cada cartão no fechamento de
+    // ciclo mais próximo, caso tenha ficado desalinhada por pagamentos feitos antes desta
+    // correção (quando era salva como "hoje", não o fechamento real). Roda toda vez que os
+    // dados carregam — não precisa persistir a correção nem pedir nada ao usuário, porque o
+    // valor corrigido é sempre recalculado do mesmo jeito a partir do que já está salvo.
+    const loadedCards = loaded.cards || initialCards;
+    setCards(loadedCards.map((c) => (
+      c.paidThroughDate ? { ...c, paidThroughDate: snapToClosingBoundary(c, c.paidThroughDate) } : c
+    )));
     setGoals(loaded.goals || initialGoals);
     setCaixinhas(loaded.caixinhas || initialCaixinhas);
     setRecurring(loaded.recurring || initialRecurring);
@@ -5949,19 +5951,6 @@ export default function App() {
     }
     addToast(`Fatura do ${card.bank} paga (${formatBRL(amount)}).`);
   }
-  // Corrige a paidThroughDate de um cartão que ficou desalinhada do ciclo por pagamentos feitos
-  // antes desta correção (quando ela era salva como "hoje", em vez do fechamento do ciclo). Só
-  // "encaixa" a data já salva no fechamento válido mais próximo pra trás — não muda nenhum
-  // lançamento, é só a referência que o cartão usa pra saber o que já está coberto.
-  function fixCardInvoiceReference(card) {
-    if (!card.paidThroughDate) return;
-    const fixed = snapToClosingBoundary(card, card.paidThroughDate);
-    if (fixed === card.paidThroughDate) return;
-    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: fixed } : c));
-    setCards(updatedCards);
-    persist({ cards: updatedCards });
-    addToast(`Referência da fatura do ${card.bank} corrigida.`);
-  }
   // Traz TODAS as parcelas futuras (ainda não vencidas) de um cartão pra fatura atual, somadas
   // numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o que
   // falta de uma vez, em vez de esperar os próximos meses.
@@ -6252,7 +6241,7 @@ export default function App() {
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
               {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} onFixInvoiceReference={fixCardInvoiceReference} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
