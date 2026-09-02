@@ -4243,6 +4243,20 @@ function CardForm({ initial, accounts, pendingInvoiceCount = 0, onSave, onDelete
           <div><FieldLabel>Dia do fechamento</FieldLabel><input type="number" inputMode="numeric" min={1} max={31} value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, closingDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
           <div><FieldLabel>Dia do vencimento</FieldLabel><input type="number" inputMode="numeric" min={1} max={31} value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: Number(e.target.value) })} onBlur={(e) => setForm({ ...form, dueDay: clampDay(Number(e.target.value)) })} className={inputClass} style={inputStyle} /></div>
         </div>
+        <div>
+          <FieldLabel>Fatura paga até</FieldLabel>
+          <input
+            type="date"
+            value={form.paidThroughDate || ''}
+            onChange={(e) => setForm({ ...form, paidThroughDate: e.target.value || null })}
+            className={inputClass} style={inputStyle}
+          />
+          <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>
+            Data até a qual a fatura já foi paga. Normalmente é preenchida sozinha ao clicar em "Pagar fatura" — só mude aqui se
+            precisar corrigir manualmente (por exemplo, depois de alterar o dia do fechamento, o que pode deixar essa data
+            desalinhada com o novo ciclo). Deixe em branco se nada ainda foi pago.
+          </p>
+        </div>
         <p className="text-xs" style={{ color: 'var(--text-soft)' }}>A fatura é calculada automaticamente a partir dos lançamentos feitos neste cartão — não precisa informar um valor inicial.</p>
         <div className="flex items-center justify-between gap-3 pt-2">
           {initial && onDelete ? (
