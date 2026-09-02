@@ -519,16 +519,31 @@ function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
   return ymd(new Date(prevRef.getFullYear(), prevRef.getMonth(), Math.min(card.closingDay, daysInMonth(prevRef.getFullYear(), prevRef.getMonth()))));
 }
 
-// A fatura "atual" (aberta) é o ciclo em que a data de referência (hoje, por padrão) cai — a
-// MESMA lógica de ciclo usada na aba "Fatura mensal" (getCardInvoiceCycle), pra que os dois
-// números sempre batam quando estão olhando pro mesmo mês. Antes o corte usado aqui era
-// getNextCardDueDate (o próximo vencimento cronológico a partir de hoje), que podia ficar
-// "preso" no vencimento de uma fatura JÁ paga se esse vencimento ainda não tivesse passado —
-// mostrando um valor bem menor que o ciclo aberto de verdade (o que a aba "Meus cartões"
-// exibia bem diferente do que "Fatura mensal" mostrava pro mesmo cartão no mesmo mês).
+// Acha o FECHAMENTO (não o vencimento) do ciclo em aberto agora — a fronteira real que separa
+// "já faz parte dessa fatura" de "só vai entrar na próxima", igual o getCardInvoiceCycle usa pra
+// agrupar lançamentos na Fatura mensal. Diferente do vencimento (que pode cair em qualquer dia
+// do mês seguinte ao fechamento), essa data é sempre um "dia de fechamento" de algum mês — por
+// isso é o valor certo pra usar como paidThroughDate: assim o próximo lançamento já sabe, sem
+// ambiguidade, se ficou "dentro" da fatura paga ou "fora" dela (na próxima).
+function getOpenInvoiceClosingDate(card, referenceDate = new Date()) {
+  const dueDate = getNextCardDueDate(card, referenceDate);
+  const dueMonthOffset = card.dueDay < card.closingDay ? 1 : 0;
+  const closingRef = new Date(dueDate.getFullYear(), dueDate.getMonth() - dueMonthOffset, 1);
+  return new Date(closingRef.getFullYear(), closingRef.getMonth(), Math.min(card.closingDay, daysInMonth(closingRef.getFullYear(), closingRef.getMonth())));
+}
+// Corrige uma paidThroughDate que ficou desalinhada do ciclo (salva antes desta correção, como a
+// data em que a pessoa clicou em pagar, não o fechamento de verdade), "encaixando" ela no
+// fechamento de ciclo válido mais próximo — sempre pra trás, nunca pra frente, pra nunca marcar
+// como já pago um lançamento que na verdade ainda está em aberto.
+function snapToClosingBoundary(card, dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const sameMonthClosing = new Date(d.getFullYear(), d.getMonth(), Math.min(card.closingDay, daysInMonth(d.getFullYear(), d.getMonth())));
+  const closing = sameMonthClosing <= d ? sameMonthClosing : new Date(d.getFullYear(), d.getMonth() - 1, Math.min(card.closingDay, daysInMonth(d.getFullYear(), d.getMonth() - 1)));
+  return ymd(closing);
+}
+
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
-  const cycle = getCardInvoiceCycle(card, ymd(referenceDate));
-  const cutoff = ymd(new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month))));
+  const cutoff = ymd(getOpenInvoiceClosingDate(card, referenceDate));
   return transactions
     .filter((t) => t.cardId === card.id && t.type === 'despesa'
       && (!card.paidThroughDate || t.date > card.paidThroughDate)
@@ -2636,15 +2651,12 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     const monthItems = subview === 'todas'
       ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
       : cycleItems;
-    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a que contém a
-    // data de hoje) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
+    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
+    // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
     // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
-    // enquanto outro cartão ainda está com a fatura aberta no mês corrente. Usa o ciclo de hoje
-    // diretamente (não o ciclo do próximo vencimento) — senão, se o vencimento da fatura anterior
-    // (já paga) ainda não tiver passado cronologicamente, ele "ganhava" de volta o rótulo de
-    // pagável no mês errado.
-    const todayCycle = getCardInvoiceCycle(card, ymd(new Date()));
-    const isPayable = todayCycle.year === year && todayCycle.month === month;
+    // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
+    const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
+    const isPayable = dueCycle.year === year && dueCycle.month === month;
     return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
   }, [card, transactions, year, month, subview]);
 
@@ -2678,7 +2690,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
   );
 }
 
-function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onEdit, onDelete, viewedCycle }) {
+function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayInvoice, onAdvanceInstallments, onFixInvoiceReference, onEdit, onDelete, viewedCycle }) {
   // viewedCycle: opcional { year, month, label } — quando presente (navegação por mês na aba
   // Fatura), mostra o total da fatura daquele ciclo específico, não necessariamente a fatura
   // real em aberto agora. Nesse modo a visualização fica mais enxuta: pagar fatura, antecipar
@@ -2706,12 +2718,14 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   const [showPayModal, setShowPayModal] = useState(false);
   const [confirmAdvance, setConfirmAdvance] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
+  const openClosing = useMemo(() => getOpenInvoiceClosingDate(card), [card.dueDay, card.closingDay]);
   const futureInstallments = useMemo(() => {
-    const cutoff = ymd(nextDue);
+    const cutoff = ymd(openClosing);
     return transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
-  }, [card.id, transactions, nextDue]);
+  }, [card.id, transactions, openClosing]);
   const futureTotal = futureInstallments.reduce((s, t) => s + t.amount, 0);
   const pendingInvoiceCount = useMemo(() => transactions.filter((t) => t.cardId === card.id && t.status === 'Pendente').length, [transactions, card.id]);
+  const referenceMisaligned = card.paidThroughDate && snapToClosingBoundary(card, card.paidThroughDate) !== card.paidThroughDate;
   return (
     <div className="rounded-2xl p-5 text-white shadow-soft-lg" style={{ background: gradient }}>
       <div className="flex items-start justify-between mb-6">
@@ -2762,6 +2776,11 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
           </div>
           {card.paidThroughDate && (
             <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
+          )}
+          {referenceMisaligned && onFixInvoiceReference && (
+            <button onClick={() => onFixInvoiceReference(card)} className="w-full mt-2 rounded-lg px-2.5 py-2 text-[11px] text-left" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
+              A fatura atual mostrada aqui pode não bater com a Fatura mensal, de um pagamento antigo. Toque pra corrigir a referência.
+            </button>
           )}
           {futureInstallments.length > 0 && onAdvanceInstallments && (
             <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
@@ -4576,7 +4595,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, onFixInvoiceReference, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
@@ -4606,7 +4625,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
           <SectionTitle action={<Button size="sm" icon={Plus} onClick={() => setShowForm(true)}>Novo cartão</Button>}>Seus cartões</SectionTitle>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
             {cards.map((c, i) => (
-              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
+              <CreditCardVisual key={c.id} card={c} transactions={transactions} accounts={accounts} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onFixInvoiceReference={onFixInvoiceReference} onEdit={onEdit} onDelete={onDelete} gradient={cardGradients[i % cardGradients.length]} />
             ))}
           </div>
 
@@ -5901,12 +5920,7 @@ export default function App() {
   // (útil pra quem paga por fora do que é acompanhado no dashboard).
   function payCardInvoice(card, amount, accountId) {
     const today = new Date().toISOString().slice(0, 10);
-    // Mesmo corte usado em computeCardInvoice (fim do ciclo aberto), não a data de hoje nem o
-    // próximo vencimento cronológico — assim o que fica marcado como "coberto" aqui é exatamente
-    // o que a fatura atual soma, e paidThroughDate reflete o fechamento real do ciclo pago, não o
-    // dia em que a pessoa clicou em pagar.
-    const cycle = getCardInvoiceCycle(card, today);
-    const cutoff = ymd(new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month))));
+    const cutoff = ymd(getOpenInvoiceClosingDate(card));
     // Todo lançamento no crédito coberto por este pagamento (dentro da janela que estava em
     // aberto) passa de Pendente para Pago — é isso que faz o status refletir "fatura paga" nas
     // abas de Transações e Fatura mensal, sem mudar o cálculo da fatura em si (que já usava
@@ -5935,11 +5949,24 @@ export default function App() {
     }
     addToast(`Fatura do ${card.bank} paga (${formatBRL(amount)}).`);
   }
+  // Corrige a paidThroughDate de um cartão que ficou desalinhada do ciclo por pagamentos feitos
+  // antes desta correção (quando ela era salva como "hoje", em vez do fechamento do ciclo). Só
+  // "encaixa" a data já salva no fechamento válido mais próximo pra trás — não muda nenhum
+  // lançamento, é só a referência que o cartão usa pra saber o que já está coberto.
+  function fixCardInvoiceReference(card) {
+    if (!card.paidThroughDate) return;
+    const fixed = snapToClosingBoundary(card, card.paidThroughDate);
+    if (fixed === card.paidThroughDate) return;
+    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: fixed } : c));
+    setCards(updatedCards);
+    persist({ cards: updatedCards });
+    addToast(`Referência da fatura do ${card.bank} corrigida.`);
+  }
   // Traz TODAS as parcelas futuras (ainda não vencidas) de um cartão pra fatura atual, somadas
   // numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o que
   // falta de uma vez, em vez de esperar os próximos meses.
   function advanceAllFutureInstallments(card) {
-    const cutoff = ymd(getNextCardDueDate(card));
+    const cutoff = ymd(getOpenInvoiceClosingDate(card));
     const future = transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
     if (future.length === 0) return;
     const groups = {};
@@ -6225,7 +6252,7 @@ export default function App() {
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
               {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} onFixInvoiceReference={fixCardInvoiceReference} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
