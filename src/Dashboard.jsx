@@ -644,15 +644,6 @@ function getNextCardDueDate(card, referenceDate = new Date()) {
 // fechamento do cartão: compras até o dia do fechamento entram na fatura que fecha nesse mês;
 // compras depois do fechamento só entram na fatura do mês seguinte. Cada parcela seguinte
 // (offsetMonths = 0, 1, 2...) empurra o fechamento um mês pra frente a partir daí.
-function getInstallmentDueDate(card, purchaseDate, offsetMonths) {
-  let closingMonth = purchaseDate.getMonth() + (purchaseDate.getDate() > card.closingDay ? 1 : 0) + offsetMonths;
-  const closingRef = new Date(purchaseDate.getFullYear(), closingMonth, 1);
-  // Se o dia do vencimento (numericamente) vem antes do dia do fechamento, o vencimento cai
-  // no mês seguinte ao fechamento (ex: fecha dia 22, vence dia 5 → vence no mês seguinte).
-  const dueMonthOffset = card.dueDay < card.closingDay ? 1 : 0;
-  return getAdjustedDueDate(closingRef.getFullYear(), closingRef.getMonth() + dueMonthOffset, card.dueDay);
-}
-
 /* ---------- Cálculo de salário líquido CLT (INSS + IRRF, tabelas 2026) ---------- */
 
 const INSS_BRACKETS_2026 = [
@@ -806,16 +797,29 @@ function textSimilarity(a, b) {
 // 2) data: quanto mais perto, maior a pontuação (aceita até 5 dias de diferença, cobrindo
 //    compra x postagem no extrato, ou fuso/final de semana);
 // 3) nome: só entra como desempate leve, via semelhança de palavras — não precisa ser idêntico.
-function findBestDuplicateMatch(row, pool) {
+// Modo "normal" (usado na importação de CSV): compara um lançamento importado contra o que já
+// existe no app, então tolera mais (o extrato do banco pode formatar a descrição diferente do
+// que a pessoa digitou na hora, por exemplo) — janela de 5 dias, sem mínimo de semelhança de
+// nome (a combinação de data+valor já é bastante específica vindo de um extrato real).
+// Modo "strict" (usado no lançamento manual): a pessoa está prestes a confirmar um lançamento
+// de cabeça, não reconferindo um extrato — então precisa ser bem mais conservador pra não
+// acusar falso positivo em compras legítimas repetidas (ex: padaria toda semana, sempre o
+// mesmo valor redondo). Janela mais curta E agora exige um mínimo de semelhança no nome — antes
+// nome nenhum era exigido, só data+valor já "encontrava" uma duplicata mesmo com descrições
+// completamente diferentes.
+function findBestDuplicateMatch(row, pool, strict = false) {
   const rowAmount = Math.abs(row.amount).toFixed(2);
+  const maxDayDiff = strict ? 2 : 5;
+  const minNameScore = strict ? 0.34 : 0;
   let best = null;
   let bestScore = -Infinity;
   pool.forEach((c) => {
     if (c.used || Math.abs(c.amount).toFixed(2) !== rowAmount) return;
     const dayDiff = Math.abs(daysBetween(row.date, c.date));
-    if (dayDiff > 5) return;
-    const dateScore = (5 - dayDiff) / 5;
+    if (dayDiff > maxDayDiff) return;
     const nameScore = textSimilarity(row.description, c.description);
+    if (nameScore < minNameScore) return;
+    const dateScore = (maxDayDiff - dayDiff) / maxDayDiff;
     const score = dateScore * 10 + nameScore;
     if (score > bestScore) { bestScore = score; best = c; }
   });
@@ -3029,6 +3033,19 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const [installmentCount, setInstallmentCount] = useState(2);
   const [installmentCountText, setInstallmentCountText] = useState('2');
   const [installmentTotal, setInstallmentTotal] = useState(0);
+  // 'total': usuário informa o valor total da compra, o valor da parcela é calculado.
+  // 'porParcela': usuário informa o valor de cada parcela, o total é calculado automaticamente
+  // (ex: R$10 em 10x → total R$100) — útil quando você sabe o valor da parcela de cabeça (tipo
+  // uma assinatura) mas não o valor total de bate-pronto.
+  const [installmentInputMode, setInstallmentInputMode] = useState('total');
+  const [installmentPerValue, setInstallmentPerValue] = useState(0);
+
+  useEffect(() => {
+    if (installmentInputMode === 'porParcela') {
+      setInstallmentTotal(Math.round(installmentPerValue * installmentCount * 100) / 100);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [installmentInputMode, installmentPerValue, installmentCount]);
 
   const cltBreakdown = useMemo(
     () => (form.isSalary ? calcCLTNetSalary(form.grossSalary, form.dependents) : null),
@@ -3042,23 +3059,17 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.isSalary, cltBreakdown?.net]);
 
-  // "Inércia de sessão": quando os últimos lançamentos criados foram todos na mesma forma de
-  // pagamento (ex: lançando um extrato inteiro de um cartão, um por um), presume que o próximo
-  // segue o mesmo padrão e já pré-seleciona assim que o formulário abre, sem precisar digitar
-  // nada. Roda só uma vez, na criação de um lançamento novo — o autofill por nome parecido (mais
-  // específico) ainda pode sobrescrever isso depois, já que essa presunção não marca o campo
-  // como "tocado" pelo usuário.
+  // "Inércia de sessão": presume que o próximo lançamento segue a mesma forma de pagamento do
+  // último criado (ex: lançando um extrato inteiro de um cartão, um por um), já pré-selecionando
+  // assim que o formulário abre, sem precisar digitar nada. Antes exigia os últimos 3
+  // lançamentos batendo exatamente na mesma forma de pagamento antes de sugerir qualquer coisa —
+  // isso criava um atraso de "arranque" toda vez que o padrão mudava (trocou de cartão? só ia
+  // voltar a sugerir depois de 3 lançamentos manuais seguidos), dando a impressão de só funcionar
+  // de vez em quando. Usando só o último, a sugestão acompanha o padrão atual imediatamente.
   useEffect(() => {
     if (initial) return;
-    function paymentSignature(t) {
-      if (t.cardId) return `card:${t.cardId}`;
-      if (t.benefitId) return `benefit:${t.benefitId}`;
-      return `account:${t.account}:${t.paymentMethod}`;
-    }
-    const recent = transactions.filter((t) => t.type === form.type).slice(0, 3);
-    if (recent.length < 3) return;
-    const sig = paymentSignature(recent[0]);
-    if (!recent.every((t) => paymentSignature(t) === sig)) return;
+    const recent = transactions.filter((t) => t.type === form.type);
+    if (recent.length === 0) return;
     const last = recent[0];
     setForm((f) => ({
       ...f,
@@ -3072,7 +3083,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
     const card = cards.find((c) => c.id === last.cardId);
     const account = accounts.find((a) => a.id === last.account);
     const label = card ? card.bank : account ? account.bank : last.paymentMethod;
-    setSessionPatternNotice(`Seus últimos lançamentos foram em ${label} — deixei pré-selecionado, é só trocar se for diferente desta vez.`);
+    setSessionPatternNotice(`Seu último lançamento foi em ${label} — deixei pré-selecionado, é só trocar se for diferente desta vez.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3163,7 +3174,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
     if (!initial && !duplicateWarning) {
       const amountToCheck = installmentEnabled ? perInstallment : form.amount;
       const pool = transactions.map((t) => ({ date: t.date, description: t.description, amount: t.amount, used: false }));
-      const match = findBestDuplicateMatch({ date: form.date, description: form.description, amount: amountToCheck }, pool);
+      const match = findBestDuplicateMatch({ date: form.date, description: form.description, amount: amountToCheck }, pool, true);
       if (match) { setDuplicateWarning(match); return; }
     }
     doSave();
@@ -3268,7 +3279,11 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div ref={amountRef} className={flashField === 'amount' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
-              <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
+              {installmentInputMode === 'porParcela' ? (
+                <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(installmentTotal)} <span className="ml-1 text-xs">(calculado)</span></div>
+              ) : (
+                <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
+              )}
               {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
             </div>
             <div ref={dateRef} className={flashField === 'date' ? 'rounded-xl animate-field-flash' : ''}>
@@ -3343,11 +3358,21 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
         {form.type === 'despesa' && selectedCard && canToggleInstallments && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
             <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
-              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) setInstallmentTotal(form.amount || 0); }} className="w-5 h-5 shrink-0 focus-ring" />
+              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) { setInstallmentTotal(form.amount || 0); setInstallmentInputMode('total'); setInstallmentPerValue(0); } }} className="w-5 h-5 shrink-0 focus-ring" />
               {initial ? 'Converter em compra parcelada' : 'Compra parcelada'}
             </label>
             {installmentEnabled && (
               <>
+                <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--card)' }}>
+                  <button type="button" onClick={() => setInstallmentInputMode('total')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'total' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor total</button>
+                  <button type="button" onClick={() => setInstallmentInputMode('porParcela')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'porParcela' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor da parcela</button>
+                </div>
+                {installmentInputMode === 'porParcela' && (
+                  <div>
+                    <FieldLabel>Valor de cada parcela</FieldLabel>
+                    <CurrencyInput value={installmentPerValue} onChange={setInstallmentPerValue} />
+                  </div>
+                )}
                 <div>
                   <FieldLabel>Número de parcelas</FieldLabel>
                   <input
@@ -3369,7 +3394,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
                   />
                 </div>
                 <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                  {installmentCount}x de {formatBRL(perInstallment)}
+                  {installmentCount}x de {formatBRL(perInstallment)}{installmentInputMode === 'porParcela' && ` — total ${formatBRL(installmentTotal)}`}
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
                   {initial
@@ -4371,14 +4396,43 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
   );
 }
 
-function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
+function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport }) {
   const [monthOffset, setMonthOffset] = useState(0);
-  const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão
+  const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const filtersRef = useRef(null);
   const [search, setSearch] = useState('');
   const [subview, setSubview] = useState('fatura'); // 'fatura' | 'todas'
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(null);
   const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
+  const activeFilterCount = [cardFilter, paymentMethodFilter, categoryFilter].filter((f) => f !== 'all').length;
+  const fileInputRef = useRef(null);
+  const [importPreview, setImportPreview] = useState(null);
+
+  function handleImportFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: (results) => {
+        const parsed = parseNubankFaturaCSV(results.data, transactions);
+        if (parsed.purchases.length === 0 && parsed.payments.length === 0) {
+          onImport([], { error: true });
+        } else {
+          setImportPreview(parsed);
+        }
+      },
+      error: () => onImport([], { error: true }),
+    });
+    e.target.value = '';
+  }
+  function handleConfirmImport(rows, meta) {
+    setImportPreview(null);
+    onImport(rows, meta);
+  }
 
   const refDate = useMemo(() => {
     const d = new Date();
@@ -4403,6 +4457,8 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
     .filter((t) => {
       if (t.type !== 'despesa' || !t.cardId) return false;
       if (cardFilter !== 'all' && cardFilter !== t.cardId) return false;
+      if (paymentMethodFilter !== 'all' && t.paymentMethod !== paymentMethodFilter) return false;
+      if (categoryFilter !== 'all' && t.category !== categoryFilter) return false;
       const card = cards.find((c) => c.id === t.cardId);
       if (!card) return false;
       const cycle = getCardInvoiceCycle(card, t.date);
@@ -4413,15 +4469,17 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       }
       return true;
     })
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, cards, search]);
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, cards, search]);
 
   // "Todas as despesas do mês" mistura débito e crédito de propósito, só pra visualizar o mês
   // inteiro — sem botão de pagar fatura, porque débito não tem esse conceito.
   const todasTx = useMemo(() => transactions
     .filter((t) => t.type === 'despesa' && isSameMonth(t.date, year, month)
       && (cardFilter === 'all' || t.cardId === cardFilter)
+      && (paymentMethodFilter === 'all' || t.paymentMethod === paymentMethodFilter)
+      && (categoryFilter === 'all' || t.category === categoryFilter)
       && (!search.trim() || t.description.toLowerCase().includes(search.trim().toLowerCase()) || t.category.toLowerCase().includes(search.trim().toLowerCase())))
-    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, year, month, search]);
+    .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
   const total = list.reduce((s, t) => s + t.amount, 0);
@@ -4455,9 +4513,63 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         </div>
       )}
 
-      <div className="relative sm:max-w-xs">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+      <div className="flex flex-nowrap items-center gap-2 sm:max-w-xl">
+        <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
+        <div className="relative flex-1 min-w-0">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
+        </div>
+        <button onClick={() => fileInputRef.current.click()} className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium shrink-0" style={inputStyle} title="Importar fatura">
+          <Upload size={14} color="var(--text-soft)" /> Importar
+        </button>
+        <button onClick={() => fileInputRef.current.click()} className="sm:hidden flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={inputStyle} title="Importar fatura">
+          <Upload size={14} color="var(--text-soft)" />
+        </button>
+
+        <div className="hidden sm:flex items-center gap-2 shrink-0">
+          <Select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+            <option value="all">Todos cartões</option>
+            {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
+          </Select>
+          <Select value={paymentMethodFilter} onChange={(e) => setPaymentMethodFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+            <option value="all">Todas formas</option>
+            {PAYMENT_METHODS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </Select>
+          <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-xl text-sm focus-ring" style={inputStyle}>
+            <option value="all">Todas categorias</option>
+            {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </div>
+        <div className="sm:hidden shrink-0">
+          <button
+            ref={filtersRef}
+            onClick={() => setShowFilters((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+            style={inputStyle}
+          >
+            <Filter size={14} color="var(--text-soft)" /> Filtros
+            {activeFilterCount > 0 && (
+              <span className="w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>{activeFilterCount}</span>
+            )}
+          </button>
+          <Popover open={showFilters} onClose={() => setShowFilters(false)} triggerRef={filtersRef} width={256} align="center" className="p-3 space-y-2.5">
+            <Select value={cardFilter} onChange={(e) => { setCardFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+              <option value="all">Todos cartões</option>
+              {cards.map((c) => <option key={c.id} value={c.id}>{c.bank}</option>)}
+            </Select>
+            <Select value={paymentMethodFilter} onChange={(e) => { setPaymentMethodFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+              <option value="all">Todas formas</option>
+              {PAYMENT_METHODS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </Select>
+            <Select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setShowFilters(false); }} className="w-full px-3 py-2.5 rounded-xl text-base focus-ring" style={inputStyle}>
+              <option value="all">Todas categorias</option>
+              {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            {activeFilterCount > 0 && (
+              <button onClick={() => { setCardFilter('all'); setPaymentMethodFilter('all'); setCategoryFilter('all'); setShowFilters(false); }} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Limpar filtros</button>
+            )}
+          </Popover>
+        </div>
       </div>
 
       <Card>
@@ -4594,11 +4706,12 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           onDelete={(tx) => { onDeleteTransaction(tx); setEditingTx(null); }}
         />
       )}
+      {importPreview && <ImportReviewModal parsed={importPreview} accounts={accounts} cards={cards} onConfirm={handleConfirmImport} onClose={() => setImportPreview(null)} />}
     </div>
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
@@ -4635,7 +4748,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       </div>
 
       {view === 'fatura' ? (
-        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} />
+        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} />
       ) : (
         <>
           <div className="flex justify-center">
@@ -5519,6 +5632,7 @@ export default function App() {
   const [investments, setInvestments] = useState([]);
 
   const [modal, setModal] = useState(null);
+  const [editingSearchResult, setEditingSearchResult] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [celebration, setCelebration] = useState(null); // { id, origin: {x,y} | null } — explosão de emojis ao concluir uma meta
@@ -5790,20 +5904,20 @@ export default function App() {
   // existente em parcelado.
   function generateInstallmentTransactions(form, installmentPlan) {
     const { count, totalAmount } = installmentPlan;
-    const card = cards.find((c) => c.id === form.cardId);
     const groupId = uid();
     const perBase = Math.round((totalAmount / count) * 100) / 100;
     const lastAmount = Math.round((totalAmount - perBase * (count - 1)) * 100) / 100;
     const [py, pm, pd] = form.date.split('-').map(Number);
-    const purchaseDate = new Date(py, pm - 1, pd);
     const rest = { ...form };
     delete rest.installmentPlan;
     const newTxs = [];
     for (let i = 0; i < count; i++) {
       const amount = i === count - 1 ? lastAmount : perBase;
-      const dueDate = card ? getInstallmentDueDate(card, purchaseDate, i) : new Date(py, pm - 1 + i, pd);
+      const targetRef = new Date(py, pm - 1 + i, 1);
+      const day = Math.min(pd, daysInMonth(targetRef.getFullYear(), targetRef.getMonth()));
+      const occurrenceDate = new Date(targetRef.getFullYear(), targetRef.getMonth(), day);
       newTxs.push({
-        ...rest, id: uid(), amount, date: ymd(dueDate), status: rest.cardId ? 'Pendente' : 'Pago',
+        ...rest, id: uid(), amount, date: ymd(occurrenceDate), status: rest.cardId ? 'Pendente' : 'Pago',
         installmentGroupId: groupId, installmentIndex: i + 1, installmentCount: count,
       });
     }
@@ -6211,8 +6325,13 @@ export default function App() {
 
   const filteredForSearch = useMemo(() => {
     if (!search.trim()) return null;
-    const q = search.toLowerCase();
-    return transactions.filter((t) => t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
+    const q = search.toLowerCase().trim();
+    const qAmount = q.replace('.', ',');
+    return transactions.filter((t) => {
+      if (t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)) return true;
+      const amountStr = t.amount.toFixed(2).replace('.', ',');
+      return amountStr.includes(qAmount);
+    });
   }, [search, transactions]);
 
   // Resumo dos valores encontrados na busca — soma pelo total filtrado, não só pelos
@@ -6276,13 +6395,13 @@ export default function App() {
               ) : (
                 <div className="space-y-2">
                   {filteredForSearch.slice(0, 10).map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between gap-3 text-sm p-2.5 rounded-xl hover:bg-black/[0.02]">
+                    <button key={tx.id} onClick={() => setEditingSearchResult(tx)} className="w-full flex items-center justify-between gap-3 text-sm p-2.5 rounded-xl hover:bg-black/[0.02] text-left focus-ring">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         <span className="shrink-0" style={{ color: 'var(--text-soft)' }}>{formatDateShortYear(tx.date)}</span>
                         <span className="truncate min-w-0 flex-1" style={{ color: 'var(--text)' }}>{tx.description}</span>
                       </div>
                       <span className="tabular-nums font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{formatBRL(tx.amount)}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -6292,7 +6411,7 @@ export default function App() {
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
               {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
@@ -6313,6 +6432,14 @@ export default function App() {
 
       {modal?.type === 'newTransaction' && (
         <TransactionForm accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+      )}
+      {editingSearchResult && (
+        <TransactionForm
+          initial={editingSearchResult} accounts={accounts} cards={cards} benefits={benefits} transactions={transactions}
+          onSave={(f) => { editTransaction(f); setEditingSearchResult(null); }}
+          onClose={() => setEditingSearchResult(null)}
+          onDelete={(tx) => { deleteTransaction(tx); setEditingSearchResult(null); }}
+        />
       )}
       {syncConflict && (
         <SyncConflictModal date={syncConflict.date} onUseRemote={resolveSyncUseRemote} onKeepLocal={resolveSyncKeepLocal} />
