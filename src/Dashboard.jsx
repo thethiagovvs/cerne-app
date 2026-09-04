@@ -3583,7 +3583,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura }) {
+function TransactionsPage({ transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment, onBulkToggleFlag }) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'despesa' | 'receita'
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -3603,6 +3603,18 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
   const pageSize = 8;
+  // Seleção múltipla: desativada por padrão, mesmo padrão já usado na Fatura Mensal.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDateModal, setBulkDateModal] = useState(false);
+  const [bulkPaymentModal, setBulkPaymentModal] = useState(false);
+  function toggleSelect(id) {
+    setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  }
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedIds([]);
+  }
 
   const filtered = useMemo(() => transactions.filter((t) => {
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
@@ -3812,6 +3824,20 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
           </div>
         )}
 
+        {pageData.length > 0 && (
+          <div className="flex items-center justify-end gap-2 mt-3 no-print">
+            {selectionMode ? (
+              <>
+                <span className="text-xs mr-auto" style={{ color: 'var(--text-soft)' }}>{selectedIds.length} selecionado(s)</span>
+                <button onClick={() => setSelectedIds(pageData.map((t) => t.id))} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Selecionar página</button>
+                <button onClick={exitSelectionMode} className="text-xs font-medium" style={{ color: 'var(--text-soft)' }}>Cancelar</button>
+              </>
+            ) : (
+              <button onClick={() => setSelectionMode(true)} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Selecionar</button>
+            )}
+          </div>
+        )}
+
         {pageData.length === 0 ? (
           <EmptyState icon={Search} title="Nenhuma transação encontrada" description="Ajuste os filtros ou adicione um novo lançamento." />
         ) : (
@@ -3824,37 +3850,48 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                 const card = tx.cardId ? cards.find((c) => c.id === tx.cardId) : null;
                 const accName = accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida';
                 const inst = getInstallmentDisplay(tx);
-                return (
+                const rowContent = (
+                  <div className="flex items-center gap-3 p-3">
+                    {selectionMode && (
+                      <input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} className="w-5 h-5 shrink-0 focus-ring" />
+                    )}
+                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {tx.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="shrink-0" />}
+                          <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                          {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
+                        </div>
+                        <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
+                        <span className="shrink-0">{formatDateShortYear(tx.date)}</span>
+                        <span className="shrink-0">·</span>
+                        <span className="truncate">{card ? `Crédito · ${card.bank}` : `Débito · ${accName}`}</span>
+                      </div>
+                      {!selectionMode && onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
+                        <button onClick={() => setConfirmMarkPaid(tx)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
+                          <Check size={12} /> Marcar como pago
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+                return selectionMode ? (
+                  <div key={tx.id} onClick={() => toggleSelect(tx.id)} className="rounded-xl" style={{ backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : 'var(--card)', border: selectedIds.includes(tx.id) ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                    {rowContent}
+                  </div>
+                ) : (
                   <SwipeableRow
                     key={tx.id} onEdit={() => setEditing(tx)} onDelete={() => onDelete(tx)}
                     deleteConfirm={{ title: 'Excluir lançamento', description: `Tem certeza que deseja excluir "${tx.description}"? Essa ação não pode ser desfeita.` }}
                   >
-                    <div className="flex items-center gap-3 p-3">
-                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
-                            {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
-                          </div>
-                          <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5 text-xs" style={{ color: 'var(--text-soft)' }}>
-                          <span className="shrink-0">{formatDateShortYear(tx.date)}</span>
-                          <span className="shrink-0">·</span>
-                          <span className="truncate">{card ? `Crédito · ${card.bank}` : `Débito · ${accName}`}</span>
-                        </div>
-                        {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
-                          <button onClick={() => setConfirmMarkPaid(tx)} className="mt-1.5 text-xs font-medium flex items-center gap-1" style={{ color: 'var(--income)' }}>
-                            <Check size={12} /> Marcar como pago
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                    {rowContent}
                   </SwipeableRow>
                 );
               })}
-              <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>
+              {!selectionMode && <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>}
             </div>
 
             {/* Desktop/tablet: tabela completa */}
@@ -3862,6 +3899,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
               <table className="w-full min-w-[720px]">
                 <thead>
                   <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
+                    {selectionMode && <th className="pb-2 pr-2 w-8"></th>}
                     {sortableColumns.map((c) => (
                       <th key={c.key} className={`pb-2 pr-3 font-medium cursor-pointer select-none${c.center ? ' text-center' : ''}`} onClick={() => handleSort(c.key)}>
                         <span className={`flex items-center gap-1${c.center ? ' justify-center' : ''}`}>{c.label} {sortConfig.key === c.key && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
@@ -3876,9 +3914,13 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                   {pageData.map((tx) => {
                     const inst = getInstallmentDisplay(tx);
                     return (
-                    <tr key={tx.id} className="text-sm hover:bg-black/[0.02]">
+                    <tr key={tx.id} onClick={selectionMode ? () => toggleSelect(tx.id) : undefined} className="text-sm hover:bg-black/[0.02]" style={selectionMode ? { backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : undefined, cursor: 'pointer' } : undefined}>
+                      {selectionMode && (
+                        <td className="py-3 pr-2"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 focus-ring" /></td>
+                      )}
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
+                        {tx.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="inline-block mr-1 -mt-0.5" />}
                         {inst.desc}
                         {inst.count && (
                           <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
@@ -3892,13 +3934,15 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida'}</td>
                       <td className="py-3 pr-3 whitespace-nowrap text-center" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
                       <td className="py-3 pr-1 no-print">
-                        <div className="flex items-center gap-1">
-                          {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
-                            <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
-                          )}
-                          <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
-                          <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
-                        </div>
+                        {!selectionMode && (
+                          <div className="flex items-center gap-1">
+                            {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
+                              <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                            )}
+                            <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                            <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                     );
@@ -3939,6 +3983,24 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
           onConfirm={() => { onDelete(confirmDeleteRow); setConfirmDeleteRow(null); }}
           onClose={() => setConfirmDeleteRow(null)}
         />
+      )}
+      {selectionMode && selectedIds.length > 0 && (
+        <SelectionActionBar
+          count={selectedIds.length}
+          onClear={exitSelectionMode}
+          onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
+          onMoveNext={onBulkMoveNext ? () => { onBulkMoveNext(selectedIds); exitSelectionMode(); } : undefined}
+          onChangeDate={onBulkChangeDate ? () => setBulkDateModal(true) : undefined}
+          onChangePayment={onBulkChangePayment ? () => setBulkPaymentModal(true) : undefined}
+          onFlag={onBulkToggleFlag ? () => { onBulkToggleFlag(selectedIds, !transactions.find((t) => t.id === selectedIds[0])?.flagged); exitSelectionMode(); } : undefined}
+          allFlagged={!!transactions.find((t) => t.id === selectedIds[0])?.flagged}
+        />
+      )}
+      {bulkDateModal && (
+        <BulkDateModal onConfirm={(date) => { onBulkChangeDate(selectedIds, date); setBulkDateModal(false); exitSelectionMode(); }} onClose={() => setBulkDateModal(false)} />
+      )}
+      {bulkPaymentModal && (
+        <BulkPaymentModal accounts={accounts} cards={cards} onConfirm={(payment) => { onBulkChangePayment(selectedIds, payment); setBulkPaymentModal(false); exitSelectionMode(); }} onClose={() => setBulkPaymentModal(false)} />
       )}
     </div>
   );
@@ -6634,7 +6696,7 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} />}
+              {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToNextInvoice} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} onBulkToggleFlag={bulkToggleFlag} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
               {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToNextInvoice} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} onBulkToggleFlag={bulkToggleFlag} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
