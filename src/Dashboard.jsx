@@ -3589,6 +3589,11 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Cartão de crédito fica escondido por padrão aqui — a Fatura Mensal já é o lugar certo pra
+  // acompanhar isso (com fechamento de ciclo, navegação por mês etc). É só um toggle, não um
+  // "filtro ativo" de verdade — por isso fica fora do activeFilterCount, e reflete um estado de
+  // repouso, não uma escolha que o usuário precisou fazer.
+  const [showCardTx, setShowCardTx] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
@@ -3617,13 +3622,14 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   }
 
   const filtered = useMemo(() => transactions.filter((t) => {
+    if (!showCardTx && t.cardId) return false;
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
     const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
     const matchesAccount = accountFilter === 'all' || t.account === accountFilter;
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
     return matchesType && matchesSearch && matchesCategory && matchesAccount && matchesStatus;
-  }), [transactions, typeFilter, search, categoryFilter, accountFilter, statusFilter]);
+  }), [transactions, showCardTx, typeFilter, search, categoryFilter, accountFilter, statusFilter]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -3637,7 +3643,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     return arr;
   }, [filtered, sortConfig]);
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, categoryFilter, accountFilter, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, showCardTx, typeFilter, categoryFilter, accountFilter, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
@@ -3701,12 +3707,17 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
 
   return (
     <div className="space-y-6 print-area">
-      {onGoToFatura && isVisible(settings, 'transacoes', 'faturaBanner') && (
-        <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 no-print" style={{ backgroundColor: 'var(--primary-soft)' }}>
+      {isVisible(settings, 'transacoes', 'faturaBanner') && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl px-4 py-3 no-print" style={{ backgroundColor: 'var(--primary-soft)' }}>
           <p className="text-sm" style={{ color: 'var(--primary-dark)' }}>
-            Esta lista mostra tudo, incluindo parcelas de meses futuros. Pra ver só o que cai neste mês (tipo uma fatura), use o acompanhamento mensal.
+            {showCardTx
+              ? 'Esta lista mostra tudo, incluindo parcelas de meses futuros. Pra ver só o que cai neste mês (tipo uma fatura), use o acompanhamento mensal.'
+              : 'Compras no cartão de crédito ficam de fora daqui por padrão, pra não repetir a Fatura Mensal — é lá que elas têm fechamento de ciclo e navegação por mês.'}
           </p>
-          <Button size="sm" variant="secondary" icon={CalendarIcon} onClick={onGoToFatura}>Fatura mensal</Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="secondary" onClick={() => setShowCardTx((v) => !v)}>{showCardTx ? 'Ocultar cartão' : 'Mostrar cartão aqui'}</Button>
+            {onGoToFatura && <Button size="sm" variant="secondary" icon={CalendarIcon} onClick={onGoToFatura}>Fatura mensal</Button>}
+          </div>
         </div>
       )}
       {isVisible(settings, 'transacoes', 'statCards') && (
