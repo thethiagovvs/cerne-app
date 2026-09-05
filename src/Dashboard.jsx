@@ -3863,10 +3863,13 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                 const inst = getInstallmentDisplay(tx);
                 const rowContent = (
                   <div className="flex items-center gap-3 p-3">
-                    {selectionMode && (
-                      <input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} className="w-5 h-5 shrink-0 focus-ring" />
+                    {selectionMode ? (
+                      <div className="rounded-xl flex items-center justify-center shrink-0 transition-colors" style={{ width: 36, height: 36, backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary)' : 'var(--bg)', border: selectedIds.includes(tx.id) ? 'none' : '2px solid var(--border)' }}>
+                        {selectedIds.includes(tx.id) && <Check size={18} color="#fff" />}
+                      </div>
+                    ) : (
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     )}
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -3927,7 +3930,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                     return (
                     <tr key={tx.id} onClick={selectionMode ? () => toggleSelect(tx.id) : undefined} className="text-sm hover:bg-black/[0.02]" style={selectionMode ? { backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : undefined, cursor: 'pointer' } : undefined}>
                       {selectionMode && (
-                        <td className="py-3 pr-2"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 focus-ring" /></td>
+                        <td className="py-3 pr-2"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 focus-ring" style={{ accentColor: 'var(--primary)' }} /></td>
                       )}
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
@@ -4477,24 +4480,36 @@ function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <>
-      <div className="fixed z-30 left-4 right-4 bottom-24 lg:left-auto lg:right-8 lg:w-96 rounded-2xl shadow-soft-lg flex items-center gap-1 p-2 animate-fade-up" style={{ backgroundColor: 'var(--text)', color: '#fff' }}>
-        <button onClick={onClear} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title="Cancelar seleção"><X size={16} /></button>
-        <span className="text-sm font-medium px-1 shrink-0">{count}</span>
+      <div className="fixed z-30 left-4 right-4 bottom-24 lg:left-auto lg:right-8 lg:w-auto rounded-2xl shadow-soft-lg flex items-center gap-1 p-2 animate-fade-up" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>
+        <button onClick={onClear} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+          <X size={16} /><span className="text-[10px] font-medium leading-none">Fechar</span>
+        </button>
+        <span className="text-sm font-semibold px-2 shrink-0">{count}</span>
         <div className="flex-1 flex items-center justify-end gap-0.5 overflow-x-auto">
           {onFlag && (
-            <button onClick={onFlag} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title={allFlagged ? 'Desmarcar acompanhamento' : 'Marcar pra acompanhamento'}><Bookmark size={16} fill={allFlagged ? '#fff' : 'none'} /></button>
+            <button onClick={onFlag} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+              <Bookmark size={16} fill={allFlagged ? '#fff' : 'none'} /><span className="text-[10px] font-medium leading-none whitespace-nowrap">{allFlagged ? 'Desmarcar' : 'Marcar'}</span>
+            </button>
           )}
           {onChangePayment && (
-            <button onClick={onChangePayment} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title="Alterar forma de pagamento"><CreditCard size={16} /></button>
+            <button onClick={onChangePayment} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+              <CreditCard size={16} /><span className="text-[10px] font-medium leading-none">Pagamento</span>
+            </button>
           )}
           {onChangeDate && (
-            <button onClick={onChangeDate} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title="Alterar data"><CalendarIcon size={16} /></button>
+            <button onClick={onChangeDate} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+              <CalendarIcon size={16} /><span className="text-[10px] font-medium leading-none">Data</span>
+            </button>
           )}
           {onMoveNext && (
-            <button onClick={onMoveNext} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title="Mover pra próxima fatura"><ArrowRightCircle size={16} /></button>
+            <button onClick={onMoveNext} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+              <ArrowRightCircle size={16} /><span className="text-[10px] font-medium leading-none">Mover</span>
+            </button>
           )}
           {onDelete && (
-            <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-xl hover:bg-white/10 shrink-0" title="Excluir"><Trash2 size={16} /></button>
+            <button onClick={() => setConfirmDelete(true)} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
+              <Trash2 size={16} /><span className="text-[10px] font-medium leading-none">Excluir</span>
+            </button>
           )}
         </div>
       </div>
@@ -4773,23 +4788,28 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
             Todas as despesas do mês
           </button>
         </div>
-        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
           <SectionTitle subtitle={subview === 'fatura' ? 'Só lançamentos no crédito deste mês' : 'Débito + crédito deste mês'}>
             {list.length} lançamento(s)
           </SectionTitle>
           <div className="flex items-center gap-2">
             {faturaStatus && <Badge color={faturaStatus.color} soft={faturaStatus.soft}>{faturaStatus.label}</Badge>}
             <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(total)}</span>
-            {list.length > 0 && (selectionMode ? (
+          </div>
+        </div>
+        {list.length > 0 && (
+          <div className="flex items-center justify-end gap-3 mb-3">
+            {selectionMode ? (
               <>
+                <span className="text-xs mr-auto" style={{ color: 'var(--text-soft)' }}>{selectedIds.length} selecionado(s)</span>
                 <button onClick={() => setSelectedIds(list.map((t) => t.id))} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Todos</button>
                 <button onClick={exitSelectionMode} className="text-xs font-medium" style={{ color: 'var(--text-soft)' }}>Cancelar</button>
               </>
             ) : (
               <button onClick={() => setSelectionMode(true)} className="text-xs font-medium" style={{ color: 'var(--primary)' }}>Selecionar</button>
-            ))}
+            )}
           </div>
-        </div>
+        )}
         {list.length === 0 ? (
           <EmptyState icon={CalendarIcon} title="Nada por aqui" description="Nenhum lançamento encontrado para este mês com esse filtro." />
         ) : (
@@ -4805,10 +4825,13 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 const inst = getInstallmentDisplay(t);
                 const rowContent = (
                   <div className="flex items-center gap-3 p-3">
-                    {selectionMode && (
-                      <input type="checkbox" checked={selectedIds.includes(t.id)} onChange={() => toggleSelect(t.id)} className="w-5 h-5 shrink-0 focus-ring" />
+                    {selectionMode ? (
+                      <div className="rounded-xl flex items-center justify-center shrink-0 transition-colors" style={{ width: 36, height: 36, backgroundColor: selectedIds.includes(t.id) ? 'var(--primary)' : 'var(--bg)', border: selectedIds.includes(t.id) ? 'none' : '2px solid var(--border)' }}>
+                        {selectedIds.includes(t.id) && <Check size={18} color="#fff" />}
+                      </div>
+                    ) : (
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     )}
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -4862,10 +4885,13 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                     className="flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg"
                     style={selectionMode && selectedIds.includes(t.id) ? { backgroundColor: 'var(--primary-soft)', cursor: 'pointer' } : selectionMode ? { cursor: 'pointer' } : undefined}
                   >
-                    {selectionMode && (
-                      <input type="checkbox" checked={selectedIds.includes(t.id)} onChange={() => toggleSelect(t.id)} onClick={(e) => e.stopPropagation()} className="w-5 h-5 shrink-0 focus-ring" />
+                    {selectionMode ? (
+                      <div className="rounded-xl flex items-center justify-center shrink-0 transition-colors" style={{ width: 36, height: 36, backgroundColor: selectedIds.includes(t.id) ? 'var(--primary)' : 'var(--bg)', border: selectedIds.includes(t.id) ? 'none' : '2px solid var(--border)' }}>
+                        {selectedIds.includes(t.id) && <Check size={18} color="#fff" />}
+                      </div>
+                    ) : (
+                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     )}
-                    <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         {t.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="shrink-0" />}
