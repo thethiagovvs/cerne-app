@@ -776,6 +776,71 @@ function normalizeForFingerprint(description) {
     .trim();
 }
 
+// Extrai o valor de uma tag simples de um bloco OFX/SGML (formato antigo, sem fechamento
+// obrigatório de tag em muitos casos — por isso não dá pra tratar como XML estrito, só pegar o
+// texto entre "<TAG>" e a próxima quebra de linha ou tag).
+function extractOfxTag(block, tag) {
+  const match = block.match(new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i'));
+  return match ? match[1].trim() : '';
+}
+
+// Data do OFX vem como ano-mes-dia-hora-minuto-segundo seguido do fuso entre colchetes — só os
+// 8 primeiros dígitos (ano+mês+dia) interessam.
+function parseOfxDate(raw) {
+  const digits = String(raw || '').slice(0, 8);
+  if (digits.length !== 8 || !/^\d{8}$/.test(digits)) return '';
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+}
+
+// Mesma ideia do parser de CSV, mesmo formato de retorno (purchases/payments/paymentsTotal) —
+// por isso a tela de revisão de importação funciona sem nenhuma mudança, não importa se veio de
+// CSV ou OFX. TRNTYPE=CREDIT (ou um MEMO de "pagamento recebido") é tratado como pagamento da
+// fatura, não como compra nova — mesmo critério já usado no CSV, só que aqui reforçado pelo
+// próprio tipo declarado no arquivo, que o CSV não tinha.
+function parseNubankFaturaOFX(ofxText, existingTransactions) {
+  const pool = existingTransactions.map((t) => ({ date: t.date, description: t.description, amount: t.amount, used: false }));
+  const purchases = [];
+  const payments = [];
+  let paymentsTotal = 0;
+
+  const blocks = ofxText.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || [];
+  blocks.forEach((block, idx) => {
+    const trnType = extractOfxTag(block, 'TRNTYPE').toUpperCase();
+    const date = parseOfxDate(extractOfxTag(block, 'DTPOSTED'));
+    const amount = parseBRLAmount(extractOfxTag(block, 'TRNAMT'));
+    const memo = extractOfxTag(block, 'MEMO');
+    if (!date || !memo) return;
+
+    if (isPaymentEntry(memo) || trnType === 'CREDIT') {
+      const value = Math.abs(amount);
+      payments.push({ rowId: `pay-${idx}`, date, title: memo, amount: value });
+      paymentsTotal += value;
+      return;
+    }
+
+    const installment = parseInstallment(memo);
+    const description = installment ? installment.clean : memo;
+    const match = findBestDuplicateMatch({ date, description, amount }, pool);
+    const isDuplicate = !!match;
+    const isExactMatch = isDuplicate && match.date === date && normalizeForFingerprint(match.description) === normalizeForFingerprint(description);
+    if (match) match.used = true;
+
+    purchases.push({
+      rowId: `row-${idx}`,
+      date,
+      description,
+      category: guessCategory(description),
+      amount: Math.abs(amount),
+      installment: installment ? { current: installment.current, total: installment.total } : null,
+      isDuplicate,
+      isExactMatch,
+      include: !isDuplicate,
+    });
+  });
+
+  return { purchases, payments, paymentsTotal };
+}
+
 function daysBetween(dateA, dateB) {
   return Math.round((new Date(dateA + 'T00:00:00') - new Date(dateB + 'T00:00:00')) / 86400000);
 }
@@ -3663,6 +3728,21 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   function handleImportFile(e) {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.name.toLowerCase().endsWith('.ofx')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const parsed = parseNubankFaturaOFX(String(reader.result || ''), transactions);
+        if (parsed.purchases.length === 0 && parsed.payments.length === 0) {
+          onImport([], { error: true });
+        } else {
+          setImportPreview(parsed);
+        }
+      };
+      reader.onerror = () => onImport([], { error: true });
+      reader.readAsText(file);
+      e.target.value = '';
+      return;
+    }
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
       complete: (results) => {
@@ -3800,7 +3880,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
           {/* Linha 2: importar, exportar/imprimir e novo lançamento — sempre nessa linha,
               nunca estoura pra uma 3ª (tamanhos compactos no mobile garantem isso). */}
           <div className="flex items-center gap-2">
-            <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
+            <input type="file" accept=".csv,.ofx" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
             <Button variant="secondary" size="toolbar" icon={Upload} onClick={() => fileInputRef.current.click()}>Importar fatura</Button>
 
             {/* Telas maiores: botões de exportação individuais. No mobile viram um menu "⋮" — 3
@@ -4614,6 +4694,21 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   function handleImportFile(e) {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.name.toLowerCase().endsWith('.ofx')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const parsed = parseNubankFaturaOFX(String(reader.result || ''), transactions);
+        if (parsed.purchases.length === 0 && parsed.payments.length === 0) {
+          onImport([], { error: true });
+        } else {
+          setImportPreview(parsed);
+        }
+      };
+      reader.onerror = () => onImport([], { error: true });
+      reader.readAsText(file);
+      e.target.value = '';
+      return;
+    }
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
       complete: (results) => {
@@ -4713,7 +4808,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       )}
 
       <div className="flex flex-nowrap items-center gap-2 sm:max-w-xl">
-        <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
+        <input type="file" accept=".csv,.ofx" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
         <div className="relative flex-1 min-w-0">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
