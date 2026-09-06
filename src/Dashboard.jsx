@@ -1986,7 +1986,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
-            className="w-full pl-9 pr-9 py-2 rounded-xl text-base sm:text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
+            className="w-full pl-9 pr-9 h-11 box-border rounded-xl text-base sm:text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
           />
           {search && (
             <button
@@ -3701,7 +3701,7 @@ function ImportReviewModal({ parsed, accounts, cards, onConfirm, onClose }) {
    PÁGINA: TRANSAÇÕES / RECEITAS / DESPESAS (componente genérico)
    ============================================================ */
 
-function TransactionsPage({ transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment, onBulkToggleFlag }) {
+function TransactionsPage({ transactions, accounts, cards, benefits = [], settings, onAdd, onEdit, onDelete, onImport, onMarkPaid, onGoToFatura, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'despesa' | 'receita'
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -3901,7 +3901,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
               <button
                 ref={filtersRef}
                 onClick={() => setShowFilters((v) => !v)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium"
                 style={inputStyle}
               >
                 <Filter size={14} color="var(--text-soft)" /> Filtros
@@ -4010,7 +4010,6 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          {tx.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="shrink-0" />}
                           <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                           {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
                         </div>
@@ -4030,7 +4029,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                   </div>
                 );
                 return selectionMode ? (
-                  <div key={tx.id} onClick={() => toggleSelect(tx.id)} className={`rounded-xl${justToggledId === tx.id ? ' animate-press-select' : ''}`} style={{ backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : 'var(--card)', border: selectedIds.includes(tx.id) ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                  <div key={tx.id} onClick={() => toggleSelect(tx.id)} className={`rounded-xl${justToggledId === tx.id ? ' animate-press-select' : ''}`} style={{ backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : 'var(--card)' }}>
                     {rowContent}
                   </div>
                 ) : (
@@ -4073,7 +4072,6 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                       )}
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
-                        {tx.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="inline-block mr-1 -mt-0.5" />}
                         {inst.desc}
                         {inst.count && (
                           <span className="ml-2 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
@@ -4145,8 +4143,6 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
           onChangeDate={onBulkChangeDate ? () => setBulkDateModal(true) : undefined}
           onChangePayment={onBulkChangePayment ? () => setBulkPaymentModal(true) : undefined}
-          onFlag={onBulkToggleFlag ? () => { onBulkToggleFlag(selectedIds, !transactions.find((t) => t.id === selectedIds[0])?.flagged); exitSelectionMode(); } : undefined}
-          allFlagged={!!transactions.find((t) => t.id === selectedIds[0])?.flagged}
         />
       )}
       {bulkDateModal && (
@@ -4618,7 +4614,7 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 // Barra de ações flutuante da seleção múltipla — some acima do FAB (que fica no canto), pra não
 // se sobrepor a ele. As ações em si (o que cada botão faz) ficam a cargo de quem usa este
 // componente, aqui é só a casca visual + confirmação de excluir (a única ação destrutiva).
-function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment, onFlag, allFlagged }) {
+function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <>
@@ -4628,11 +4624,6 @@ function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate
         </button>
         <span className="text-sm font-semibold px-2 shrink-0">{count}</span>
         <div className="flex-1 flex items-center justify-end gap-0.5 overflow-x-auto">
-          {onFlag && (
-            <button onClick={onFlag} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-              <Bookmark size={16} fill={allFlagged ? '#fff' : 'none'} />
-            </button>
-          )}
           {onChangePayment && (
             <button onClick={onChangePayment} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
               <CreditCard size={16} /><span className="text-[10px] font-medium leading-none">Pagamento</span>
@@ -4759,7 +4750,7 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
   );
 }
 
-function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment, onBulkToggleFlag }) {
+function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
@@ -4914,10 +4905,10 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar" className="w-full pl-8 pr-3 py-2 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle} />
         </div>
-        <button onClick={() => fileInputRef.current.click()} className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium shrink-0" style={inputStyle} title="Importar fatura">
+        <button onClick={() => fileInputRef.current.click()} className="hidden sm:flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium shrink-0" style={inputStyle} title="Importar fatura">
           <Upload size={14} color="var(--text-soft)" /> Importar
         </button>
-        <button onClick={() => fileInputRef.current.click()} className="sm:hidden flex items-center justify-center w-9 h-9 rounded-xl shrink-0" style={inputStyle} title="Importar fatura">
+        <button onClick={() => fileInputRef.current.click()} className="sm:hidden flex items-center justify-center w-10 h-10 rounded-xl shrink-0" style={inputStyle} title="Importar fatura">
           <Upload size={14} color="var(--text-soft)" />
         </button>
 
@@ -4939,7 +4930,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           <button
             ref={filtersRef}
             onClick={() => setShowFilters((v) => !v)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium"
             style={inputStyle}
           >
             <Filter size={14} color="var(--text-soft)" /> Filtros
@@ -5031,7 +5022,6 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          {t.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="shrink-0" />}
                           <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                           {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
                         </div>
@@ -5052,7 +5042,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                   </div>
                 );
                 return selectionMode ? (
-                  <div key={t.id} onClick={() => toggleSelect(t.id)} className={`rounded-xl${justToggledId === t.id ? ' animate-press-select' : ''}`} style={{ backgroundColor: selectedIds.includes(t.id) ? 'var(--primary-soft)' : 'var(--card)', border: selectedIds.includes(t.id) ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                  <div key={t.id} onClick={() => toggleSelect(t.id)} className={`rounded-xl${justToggledId === t.id ? ' animate-press-select' : ''}`} style={{ backgroundColor: selectedIds.includes(t.id) ? 'var(--primary-soft)' : 'var(--card)' }}>
                     {rowContent}
                   </div>
                 ) : (
@@ -5092,7 +5082,6 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        {t.flagged && <Bookmark size={12} fill="var(--primary)" color="var(--primary)" className="shrink-0" />}
                         <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                         {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
                       </div>
@@ -5152,8 +5141,6 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
           onChangeDate={onBulkChangeDate ? () => setBulkDateModal(true) : undefined}
           onChangePayment={onBulkChangePayment ? () => setBulkPaymentModal(true) : undefined}
-          onFlag={onBulkToggleFlag ? () => { onBulkToggleFlag(selectedIds, !transactions.find((t) => t.id === selectedIds[0])?.flagged); exitSelectionMode(); } : undefined}
-          allFlagged={!!transactions.find((t) => t.id === selectedIds[0])?.flagged}
         />
       )}
       {bulkDateModal && (
@@ -5169,7 +5156,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment, onBulkToggleFlag }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
@@ -5206,7 +5193,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       </div>
 
       {view === 'fatura' ? (
-        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} onBulkToggleFlag={onBulkToggleFlag} />
+        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} />
       ) : (
         <>
           <div className="flex justify-center">
@@ -6635,16 +6622,6 @@ export default function App() {
     persist({ transactions: updated, accounts: updatedAccounts, benefits: updatedBenefits });
     addToast(`Forma de pagamento de ${ids.length} lançamento(s) alterada.`);
   }
-  // "Marcar pra acompanhamento" não muda nada financeiro — só sinaliza visualmente o lançamento
-  // (uma bandeirinha) pra achar de novo depois, útil ao conferir uma fatura e deixar pra decidir
-  // sobre alguns itens específicos mais tarde, sem perder onde eles estavam.
-  function bulkToggleFlag(ids, flagged) {
-    const idSet = new Set(ids);
-    const updated = transactions.map((t) => (idSet.has(t.id) ? { ...t, flagged } : t));
-    setTransactions(updated);
-    persist({ transactions: updated });
-    addToast(flagged ? `${ids.length} lançamento(s) marcado(s) pra acompanhamento.` : `${ids.length} lançamento(s) desmarcado(s).`);
-  }
   function importTransactions(rows, meta = {}) {
     if (rows.length === 0) {
       if (meta.error) addToast('Não foi possível ler o arquivo. Verifique se é um CSV de fatura do Nubank.', 'error');
@@ -7059,9 +7036,9 @@ export default function App() {
           ) : (
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
-              {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} onBulkToggleFlag={bulkToggleFlag} />}
+              {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} onBulkToggleFlag={bulkToggleFlag} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
