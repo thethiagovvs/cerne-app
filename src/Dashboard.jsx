@@ -101,6 +101,15 @@ const GLOBAL_STYLES = `
 .cerne-root.theme-ameixa { --primary: #7D5A82; --primary-dark: #664867; --primary-soft: #EFE7F0; }
 .cerne-root.theme-ameixa.dark { --primary: #B08AB8; --primary-dark: #9B76A3; --primary-soft: #332B36; }
 
+.cerne-root.theme-laranja { --primary: #C97D3A; --primary-dark: #A8672F; --primary-soft: #F3E6D6; }
+.cerne-root.theme-laranja.dark { --primary: #E8A868; --primary-dark: #D6924F; --primary-soft: #3A2E1E; }
+
+.cerne-root.theme-amarelo { --primary: #B99A3A; --primary-dark: #9C8130; --primary-soft: #F2EDD6; }
+.cerne-root.theme-amarelo.dark { --primary: #E0C468; --primary-dark: #CBAF4F; --primary-soft: #362F1B; }
+
+.cerne-root.theme-marrom { --primary: #8B6448; --primary-dark: #74513A; --primary-soft: #EBE1D8; }
+.cerne-root.theme-marrom.dark { --primary: #B89078; --primary-dark: #A37D64; --primary-soft: #332920; }
+
 .cerne-root, .cerne-root * { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
 .font-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
 
@@ -197,18 +206,43 @@ const BASE_CATEGORIES = {
 };
 // Ícones em forma geométrica pras categorias personalizadas (o usuário escolhe cor + forma, em
 // vez de escolher entre centenas de ícones). Mesma "interface" de um ícone lucide-react (aceitam
-// size/color), então funcionam em qualquer lugar que já espera um ícone de categoria.
+// size/color), então funcionam em qualquer lugar que já espera um ícone de categoria. Em
+// outline (contorno), não preenchidos — pra ficar no mesmo estilo dos ícones do lucide-react
+// usados no resto do app.
 function ShapeSquareIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3" stroke={color} strokeWidth="2" /></svg>;
 }
 function ShapeCircleIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke={color} strokeWidth="2" /></svg>;
 }
 function ShapeTriangleIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><path d="M12 3 L21 20 L3 20 Z" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M12 4 L20 19 L4 19 Z" stroke={color} strokeWidth="2" strokeLinejoin="round" /></svg>;
 }
 const SHAPE_ICONS = { square: ShapeSquareIcon, circle: ShapeCircleIcon, triangle: ShapeTriangleIcon };
-const CATEGORY_COLOR_PALETTE = ['#8A9B7D', '#C98A5E', '#D4A574', '#7B93A8', '#C97A7A', '#B98DAF', '#6FA8A0', '#B9A24C', '#6B8FB0', '#A8A398'];
+// Paleta de cores expandida — usada tanto na cor de categorias/metas quanto (as famílias que
+// já existiam) nos temas de destaque do sistema, em Configurações → Aparência. Cada família
+// tem uma variante clara e uma escura, escolhidas pra serem bem diferenciáveis entre si — a
+// paleta antiga de 10 cores tinha vários tons parecidos (vários verde/marrom acinzentados)
+// que ficavam difíceis de distinguir num relance.
+const COLOR_PALETTE = [
+  { key: 'verde', label: 'Verde', escuro: '#5D7052', claro: '#8FA680' },
+  { key: 'azul', label: 'Azul', escuro: '#4A6FA5', claro: '#7CA3D6' },
+  { key: 'roxo', label: 'Roxo', escuro: '#7D5A82', claro: '#B08AB8' },
+  { key: 'rosa', label: 'Rosa', escuro: '#B5677E', claro: '#D98CA0' },
+  { key: 'vermelho', label: 'Vermelho', escuro: '#B5514A', claro: '#E0938C' },
+  { key: 'laranja', label: 'Laranja', escuro: '#C97D3A', claro: '#E8A868' },
+  { key: 'amarelo', label: 'Amarelo', escuro: '#B99A3A', claro: '#E0C468' },
+  { key: 'marrom', label: 'Marrom', escuro: '#8B6448', claro: '#B89078' },
+  { key: 'preto', label: 'Preto', escuro: '#1E1E1E', claro: '#5C5C5C' },
+  { key: 'cinza', label: 'Cinza', escuro: '#767676', claro: '#A8A8A8' },
+  { key: 'branco', label: 'Branco', escuro: '#BFBFBF', claro: '#EDEDED' },
+];
+// Achatada em pares [cor, rótulo] pra popular o seletor de cor de categorias/metas — 22 opções
+// (11 famílias × clara/escura) no lugar das 10 cores soltas de antes.
+const CATEGORY_COLOR_PALETTE = COLOR_PALETTE.flatMap((c) => [
+  { hex: c.escuro, label: `${c.label} escuro` },
+  { hex: c.claro, label: `${c.label} claro` },
+]);
 
 let CATEGORIES = { ...BASE_CATEGORIES };
 let CATEGORY_NAMES = Object.keys(CATEGORIES);
@@ -225,7 +259,13 @@ function rebuildCategories(settings) {
     if (name === 'Outros' || !hidden.includes(name)) merged[name] = meta;
   });
   custom.forEach((c) => {
-    merged[c.name] = { color: c.color, soft: `${c.color}29`, icon: SHAPE_ICONS[c.shape] || SHAPE_ICONS.square };
+    // c.icon é o novo formato — chave da ICON_LIBRARY (ex: "Home") OU de SHAPE_ICONS (ex:
+    // "square", pra quando nenhum ícone específico combina). c.shape é o formato antigo
+    // (categorias criadas antes da biblioteca de ícones compartilhada só guardavam uma forma
+    // geométrica) — mantido como alternativa aqui pra categorias já salvas continuarem
+    // funcionando sem precisar de uma migração dos dados salvos.
+    const icon = ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon;
+    merged[c.name] = { color: c.color, soft: `${c.color}29`, icon };
   });
   CATEGORIES = merged;
   CATEGORY_NAMES = Object.keys(CATEGORIES);
@@ -1017,7 +1057,22 @@ const initialGoals = [
     { date: '2026-07-15', amount: 900 },
   ] },
 ];
-const GOAL_ICONS = { Wallet, Plane, Laptop, Award, Home, Car, Bike, Shirt, GraduationCap, Heart, Briefcase, Sprout, PersonStanding, PiggyBank };
+// Biblioteca de ícones compartilhada entre metas e categorias personalizadas — um ícone
+// disponível pra um já fica disponível pro outro, em vez de cada um ter seu próprio conjunto
+// separado (Casa e Carro, por exemplo, fazem sentido nos dois contextos). Guardado por nome
+// (string) tanto em goal.icon quanto em customCategory.icon, então funciona como uma chave
+// estável independente de qual variável local o ícone importado do lucide-react tem aqui.
+const ICON_LIBRARY = {
+  Home, Building2, Landmark,
+  ShoppingCart, ShoppingBag, CreditCard, Banknote, Wallet, PiggyBank,
+  Utensils, Car, Bike, Plane,
+  Heart, Flower2, Sprout,
+  Film, Sparkles, Bookmark,
+  GraduationCap, Briefcase, Laptop, Smartphone, MessageCircle,
+  Shirt, Award, PersonStanding, Target,
+  MoreHorizontal,
+};
+const GOAL_ICONS = ICON_LIBRARY;
 
 // Temas de cor de destaque, cada um com uma variante para claro e uma para escuro.
 // As cores semânticas (receita, despesa, investimento, meta, alerta) não mudam entre temas.
@@ -1028,6 +1083,9 @@ const COLOR_THEMES = {
   vermelho: { label: 'Terracota', light: '#A85D4E', dark: '#CC8271' },
   branco: { label: 'Monocromático', light: '#3A3A3A', dark: '#C9C9C9' },
   ameixa: { label: 'Ameixa', light: '#7D5A82', dark: '#B08AB8' },
+  laranja: { label: 'Laranja', light: '#C97D3A', dark: '#E8A868' },
+  amarelo: { label: 'Amarelo', light: '#B99A3A', dark: '#E0C468' },
+  marrom: { label: 'Marrom', light: '#8B6448', dark: '#B89078' },
 };
 
 /* ---------- Derivar tonalidades de uma cor-base (usado nos gradientes dos cartões) ---------- */
@@ -2464,7 +2522,11 @@ function MonthSummaryPanel({ transactions, kpis }) {
 /* ---------- Metas (preview + cards) ---------- */
 
 function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) {
-  const Icon = GOAL_ICONS[goal.icon] || Target;
+  const Icon = ICON_LIBRARY[goal.icon] || Target;
+  // Metas antigas (criadas antes da cor personalizável) não têm goal.color — continuam na cor
+  // de destaque do sistema, como sempre foi.
+  const accent = goal.color || 'var(--primary)';
+  const accentSoft = goal.color ? `${goal.color}29` : 'var(--primary-soft)';
   const percent = Math.min(100, (goal.current / goal.target) * 100);
   const [adding, setAdding] = useState(false);
   const [amount, setAmount] = useState(0);
@@ -2490,7 +2552,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
   return (
     <Card ref={cardRef} className="animate-fade-up" padding="p-5">
       <div className="flex items-start gap-3 mb-4">
-        <IconCircle icon={Icon} color="var(--primary)" soft="var(--primary-soft)" size={36} />
+        <IconCircle icon={Icon} color={accent} soft={accentSoft} size={36} />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate" style={{ color: 'var(--text)' }}>{goal.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Previsão: {deadlineLabel}</p>
@@ -2506,11 +2568,11 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
         <span className="font-display text-xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(goal.current)}</span>
         <span className="text-xs tabular-nums" style={{ color: 'var(--text-soft)' }}>de {formatBRL(goal.target)}</span>
       </div>
-      <ProgressBar percent={percent} color="var(--primary)" />
+      <ProgressBar percent={percent} color={accent} />
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs font-semibold" style={{ color: 'var(--primary-dark)' }}>{percent.toFixed(0)}% concluído</span>
+        <span className="text-xs font-semibold" style={{ color: accent }}>{percent.toFixed(0)}% concluído</span>
         {!compact && !adding && (
-          <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+          <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: accent }}>
             <Plus size={12} /> Adicionar valor
           </button>
         )}
@@ -2526,7 +2588,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
           {estimate.status === 'ok' && (
             <p className="text-xs flex items-start gap-1.5" style={{ color: 'var(--text-soft)' }}>
-              <TrendingUp size={13} className="mt-0.5 shrink-0" color="var(--primary)" />
+              <TrendingUp size={13} className="mt-0.5 shrink-0" color={accent} />
               <span>No ritmo atual (~{formatBRL(estimate.avgMonthly)}/mês), a meta deve ser concluída em <strong style={{ color: 'var(--text)' }}>{estimate.etaLabel}</strong>.</span>
             </p>
           )}
@@ -2538,7 +2600,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
           )}
           {history.length > 0 && (
             <>
-              <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-medium mt-2 flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+              <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-medium mt-2 flex items-center gap-1" style={{ color: accent }}>
                 {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Histórico de aportes ({history.length})
               </button>
               {showHistory && (
@@ -2546,7 +2608,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
                   {[...history].reverse().map((h, i) => (
                     <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
                       <span style={{ color: 'var(--text-soft)' }}>{formatDate(h.date)}</span>
-                      <span className="tabular-nums font-medium" style={{ color: 'var(--primary-dark)' }}>+{formatBRL(h.amount)}</span>
+                      <span className="tabular-nums font-medium" style={{ color: accent }}>+{formatBRL(h.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -2568,7 +2630,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
 }
 
 function GoalForm({ initial, onSave, onClose }) {
-  const [form, setForm] = useState(initial || { name: '', target: 0, current: 0, deadline: '', icon: 'Wallet' });
+  const [form, setForm] = useState(initial || { name: '', target: 0, current: 0, deadline: '', icon: 'Wallet', color: CATEGORY_COLOR_PALETTE[0].hex });
   const [errors, setErrors] = useState({});
   function validate() {
     const e = {};
@@ -2578,6 +2640,7 @@ function GoalForm({ initial, onSave, onClose }) {
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+  const accent = form.color || 'var(--primary)';
   return (
     <Modal title={initial ? 'Editar meta' : 'Nova meta'} onClose={onClose}>
       <div className="space-y-4">
@@ -2608,11 +2671,19 @@ function GoalForm({ initial, onSave, onClose }) {
           {errors.deadline && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.deadline}</p>}
         </div>
         <div>
-          <FieldLabel>Ícone</FieldLabel>
+          <FieldLabel>Cor</FieldLabel>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(GOAL_ICONS).map(([key, Icon]) => (
-              <button key={key} onClick={() => setForm({ ...form, icon: key })} className="p-2.5 rounded-xl" style={{ backgroundColor: form.icon === key ? 'var(--primary-soft)' : 'transparent', border: '1px solid var(--border)' }}>
-                <Icon size={16} color={form.icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+            {CATEGORY_COLOR_PALETTE.map((c) => (
+              <button key={c.hex} type="button" onClick={() => setForm({ ...form, color: c.hex })} title={c.label} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: c.hex, border: accent === c.hex ? '2px solid var(--text)' : '2px solid transparent' }} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Ícone</FieldLabel>
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+            {Object.entries(ICON_LIBRARY).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setForm({ ...form, icon: key })} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: form.icon === key ? `${accent}29` : 'transparent', border: form.icon === key ? `1px solid ${accent}` : '1px solid var(--border)' }}>
+                <Icon size={16} color={form.icon === key ? accent : 'var(--text-soft)'} />
               </button>
             ))}
           </div>
@@ -2643,9 +2714,14 @@ function GoalsSection({ goals, onAddFunds, onDelete, onCompleted, onSeeAll, comp
 
 function FinancialCalendar({ cards, transactions }) {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selectedDay, setSelectedDay] = useState(null);
   const year = viewDate.getFullYear(), month = viewDate.getMonth();
   const cells = getMonthGrid(year, month);
   const weekDays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+  // O dia selecionado só faz sentido dentro do mês em que foi clicado — ao navegar pra outro
+  // mês, o número do dia deixa de se referir ao mesmo lugar, então a seleção é limpa.
+  useEffect(() => { setSelectedDay(null); }, [year, month]);
 
   // Prioriza os gastos e lançamentos de despesas do mês — inclusive os já pagos — para o
   // calendário refletir onde o dinheiro realmente foi, e não só a rotina de fatura do cartão.
@@ -2678,6 +2754,9 @@ function FinancialCalendar({ cards, transactions }) {
 
   const now = new Date();
   const monthOffset = (year - now.getFullYear()) * 12 + (month - now.getMonth());
+  // Com um dia selecionado, a lista abaixo mostra só os eventos daquele dia — clicar de novo
+  // no mesmo dia (ou no "x" do chip) volta a mostrar o mês inteiro.
+  const displayedEvents = selectedDay ? events.filter((e) => e.day === selectedDay) : events;
 
   return (
     <Card className="animate-fade-up">
@@ -2693,24 +2772,44 @@ function FinancialCalendar({ cards, transactions }) {
       </div>
       <div className="grid grid-cols-7 gap-1 mb-3">
         {weekDays.map((d, i) => <div key={i} className="text-center text-[11px] font-medium py-1" style={{ color: 'var(--text-soft)' }}>{d}</div>)}
-        {cells.map((c) => (
-          <div key={c.key} className="aspect-square flex items-center justify-center relative">
-            {c.day && (
-              <span className="text-xs w-7 h-7 flex items-center justify-center rounded-full" style={{ color: 'var(--text)' }}>
-                {c.day}
-                {dayDominantType[c.day] && <span className="absolute bottom-0.5 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors[dayDominantType[c.day]] }} />}
-              </span>
-            )}
-          </div>
-        ))}
+        {cells.map((c) => {
+          const isSelected = c.day != null && selectedDay === c.day;
+          const isDimmed = c.day != null && selectedDay != null && !isSelected;
+          return (
+            <button
+              key={c.key} type="button" disabled={!c.day}
+              onClick={() => setSelectedDay((cur) => (cur === c.day ? null : c.day))}
+              className="aspect-square flex items-center justify-center relative bg-transparent border-0 p-0"
+              style={{ cursor: c.day ? 'pointer' : 'default' }}
+            >
+              {c.day && (
+                <span
+                  className="text-xs w-7 h-7 flex items-center justify-center rounded-full transition-colors"
+                  style={{ color: isSelected ? '#fff' : 'var(--text)', backgroundColor: isSelected ? 'var(--primary)' : 'transparent', opacity: isDimmed ? 0.35 : 1 }}
+                >
+                  {c.day}
+                  {dayDominantType[c.day] && !isSelected && <span className="absolute bottom-0.5 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors[dayDominantType[c.day]] }} />}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.gasto }} /> Gasto</span>
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.recebimento }} /> Recebimento</span>
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.vencimento }} /> Vencimento de fatura</span>
+        {selectedDay ? (
+          <button onClick={() => setSelectedDay(null)} className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+            Dia {selectedDay} <X size={11} />
+          </button>
+        ) : (
+          <>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.gasto }} /> Gasto</span>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.recebimento }} /> Recebimento</span>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.vencimento }} /> Vencimento de fatura</span>
+          </>
+        )}
       </div>
       <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-        {events.map((e, i) => (
+        {displayedEvents.map((e, i) => (
           <div key={i} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-display font-semibold w-6 text-center shrink-0" style={{ color: 'var(--primary)' }}>{e.day}</span>
@@ -2719,7 +2818,11 @@ function FinancialCalendar({ cards, transactions }) {
             <span className="tabular-nums font-medium shrink-0 ml-2" style={{ color: eventColors[e.type] }}>{formatBRL(e.amount)}</span>
           </div>
         ))}
-        {events.length === 0 && <p className="text-xs text-center py-4" style={{ color: 'var(--text-soft)' }}>Nenhum evento próximo neste mês.</p>}
+        {displayedEvents.length === 0 && (
+          <p className="text-xs text-center py-4" style={{ color: 'var(--text-soft)' }}>
+            {selectedDay ? `Nenhum lançamento no dia ${selectedDay}.` : 'Nenhum evento próximo neste mês.'}
+          </p>
+        )}
       </div>
     </Card>
   );
@@ -5865,25 +5968,95 @@ function VisibilitySettingsSection({ settings, onChangeSettings }) {
   );
 }
 
-// Gerenciamento de categorias em Configurações: remover categorias do conjunto base (viram
-// "Outros" em qualquer lançamento antigo que já as usava, mas sem apagar nada) e adicionar até 3
-// personalizadas, com cor da paleta do app e um ícone em forma geométrica (mais simples que
-// escolher entre uma lista enorme de ícones).
-function CategoriesSettingsSection({ settings, onChangeSettings }) {
+// Formulário de categoria personalizada — usado tanto pra criar quanto (via swipe pra editar,
+// na lista abaixo) pra alterar nome, cor e ícone de uma categoria já criada. O ícone vem da
+// mesma ICON_LIBRARY usada nas metas (mais as 3 formas geométricas, pra quando nenhum ícone
+// específico combinar), e a cor vem da paleta expandida de 22 tons.
+function CategoryForm({ initial, existingNames, onSave, onClose }) {
+  const isEditing = !!initial;
+  const [name, setName] = useState(initial?.name || '');
+  const [color, setColor] = useState(initial?.color || CATEGORY_COLOR_PALETTE[0].hex);
+  const [icon, setIcon] = useState(initial?.icon || 'Home');
+  const [error, setError] = useState('');
+  const PreviewIcon = ICON_LIBRARY[icon] || SHAPE_ICONS[icon] || ShapeSquareIcon;
+
+  function handleSave() {
+    const trimmed = name.trim();
+    if (!trimmed) { setError('Informe um nome'); return; }
+    const nameChanged = !isEditing || trimmed.toLowerCase() !== initial.name.toLowerCase();
+    if (nameChanged && existingNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())) {
+      setError('Já existe uma categoria com esse nome');
+      return;
+    }
+    onSave({ name: trimmed, color, icon });
+  }
+
+  return (
+    <Modal title={isEditing ? 'Editar categoria' : 'Nova categoria'} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <FieldLabel error={error}>Nome da categoria</FieldLabel>
+          <input value={name} onChange={(e) => { setName(e.target.value); setError(''); }} className={inputClass} style={inputStyle} placeholder="Ex: Pets" maxLength={20} />
+          {error && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{error}</p>}
+        </div>
+        <div>
+          <FieldLabel>Cor</FieldLabel>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORY_COLOR_PALETTE.map((c) => (
+              <button key={c.hex} type="button" onClick={() => setColor(c.hex)} title={c.label} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: c.hex, border: color === c.hex ? '2px solid var(--text)' : '2px solid transparent' }} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Ícone</FieldLabel>
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+            {Object.entries(ICON_LIBRARY).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setIcon(key)} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: icon === key ? 'var(--primary-soft)' : 'transparent', border: icon === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                <Icon size={16} color={icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+              </button>
+            ))}
+            {Object.entries(SHAPE_ICONS).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setIcon(key)} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: icon === key ? 'var(--primary-soft)' : 'transparent', border: icon === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                <Icon size={16} color={icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl p-3 flex items-center gap-3" style={{ backgroundColor: 'var(--bg)' }}>
+          <IconCircle icon={PreviewIcon} color={color} soft={`${color}29`} size={36} />
+          <span className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{name.trim() || 'Pré-visualização'}</span>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={handleSave}>{isEditing ? 'Salvar alterações' : 'Adicionar'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Gerenciamento de categorias em Configurações: ocultar categorias do conjunto base (viram
+// "Outros" em qualquer lançamento antigo que já as usava, mas sem apagar nada — e dá pra
+// restaurar depois) e criar até 3 personalizadas, com cor da paleta expandida e um ícone da
+// biblioteca compartilhada com as metas. Categorias personalizadas aceitam swipe pra editar
+// (nome, cor e ícone) ou excluir, igual às outras listas do app.
+function CategoriesSettingsSection({ settings, onChangeSettings, onEditCategory }) {
   const hidden = settings.hiddenCategories || [];
   const custom = settings.customCategories || [];
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState(CATEGORY_COLOR_PALETTE[0]);
-  const [newShape, setNewShape] = useState('square');
+  const [editingCategory, setEditingCategory] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(null);
   const builtIn = Object.keys(BASE_CATEGORIES).filter((n) => n !== 'Outros');
+  const allNames = [...builtIn, ...custom.map((c) => c.name)];
 
-  function addCategory() {
-    const name = newName.trim();
-    if (!name || custom.length >= 3) return;
-    onChangeSettings({ ...settings, customCategories: [...custom, { name, color: newColor, shape: newShape }] });
-    setNewName(''); setNewColor(CATEGORY_COLOR_PALETTE[0]); setNewShape('square'); setShowAddForm(false);
+  function addCategory(data) {
+    if (custom.length >= 3) return;
+    onChangeSettings({ ...settings, customCategories: [...custom, data] });
+    setShowAddForm(false);
+  }
+  function saveEditedCategory(data) {
+    onEditCategory(editingCategory.name, data);
+    setEditingCategory(null);
   }
   function confirmAndRemove() {
     const name = confirmRemove;
@@ -5916,65 +6089,54 @@ function CategoriesSettingsSection({ settings, onChangeSettings }) {
             </div>
           );
         })}
-        {custom.map((c) => {
-          const ShapeIcon = SHAPE_ICONS[c.shape] || SHAPE_ICONS.square;
-          return (
-            <div key={c.name} className="flex items-center justify-between gap-3 py-1.5">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <IconCircle icon={ShapeIcon} color={c.color} soft={`${c.color}29`} size={30} />
-                <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</span>
-                <Badge color="var(--primary)" soft="var(--primary-soft)">Nova</Badge>
-              </div>
-              <button onClick={() => setConfirmRemove(c.name)} className="text-xs font-medium shrink-0" style={{ color: 'var(--text-soft)' }}>Remover</button>
-            </div>
-          );
-        })}
+        {custom.length > 0 && (
+          <div className="pt-1 space-y-1.5">
+            {custom.map((c) => {
+              const ShapeIcon = ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon;
+              return (
+                <SwipeableRow
+                  key={c.name} onEdit={() => setEditingCategory(c)} onDelete={() => setConfirmRemove(c.name)}
+                  deleteConfirm={{ title: 'Excluir categoria', description: `Lançamentos que já usam "${c.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?` }}
+                >
+                  <div className="flex items-center justify-between gap-3 py-1.5 px-1">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <IconCircle icon={ShapeIcon} color={c.color} soft={`${c.color}29`} size={30} />
+                      <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</span>
+                      <Badge color="var(--primary)" soft="var(--primary-soft)">Nova</Badge>
+                    </div>
+                    <Pencil size={14} color="var(--text-soft)" className="shrink-0" />
+                  </div>
+                </SwipeableRow>
+              );
+            })}
+            <p className="text-[11px] px-1" style={{ color: 'var(--text-soft)' }}>Arraste uma categoria nova pra esquerda pra editar ou excluir</p>
+          </div>
+        )}
       </div>
 
       <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
-        {showAddForm ? (
-          <div className="space-y-3">
-            <div>
-              <FieldLabel>Nome da categoria</FieldLabel>
-              <input value={newName} onChange={(e) => setNewName(e.target.value)} className={inputClass} style={inputStyle} placeholder="Ex: Pets" maxLength={20} />
-            </div>
-            <div>
-              <FieldLabel>Cor</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORY_COLOR_PALETTE.map((color) => (
-                  <button key={color} onClick={() => setNewColor(color)} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: color, border: newColor === color ? '2px solid var(--text)' : '2px solid transparent' }} />
-                ))}
-              </div>
-            </div>
-            <div>
-              <FieldLabel>Ícone</FieldLabel>
-              <div className="flex gap-2">
-                {['square', 'circle', 'triangle'].map((key) => {
-                  const Icon = SHAPE_ICONS[key];
-                  return (
-                    <button key={key} onClick={() => setNewShape(key)} className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ backgroundColor: newShape === key ? 'var(--primary-soft)' : 'var(--bg)', border: newShape === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
-                      <Icon size={18} color={newShape === key ? 'var(--primary-dark)' : 'var(--text-soft)'} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-1">
-              <Button variant="secondary" size="sm" onClick={() => setShowAddForm(false)}>Cancelar</Button>
-              <Button size="sm" onClick={addCategory} disabled={!newName.trim()}>Adicionar</Button>
-            </div>
-          </div>
-        ) : custom.length >= 3 ? (
+        {custom.length >= 3 ? (
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Limite de 3 categorias novas atingido. Remova uma pra adicionar outra.</p>
         ) : (
           <Button variant="secondary" size="sm" icon={Plus} onClick={() => setShowAddForm(true)}>Nova categoria</Button>
         )}
       </div>
 
+      {showAddForm && (
+        <CategoryForm existingNames={allNames} onSave={addCategory} onClose={() => setShowAddForm(false)} />
+      )}
+      {editingCategory && (
+        <CategoryForm
+          initial={editingCategory}
+          existingNames={allNames.filter((n) => n !== editingCategory.name)}
+          onSave={saveEditedCategory}
+          onClose={() => setEditingCategory(null)}
+        />
+      )}
       {confirmRemove && (
         <ConfirmModal
-          title="Remover categoria"
-          description={`Lançamentos que já usam "${confirmRemove}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo remover?`}
+          title="Excluir categoria"
+          description={`Lançamentos que já usam "${confirmRemove}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`}
           onConfirm={confirmAndRemove}
           onClose={() => setConfirmRemove(null)}
         />
@@ -5983,7 +6145,7 @@ function CategoriesSettingsSection({ settings, onChangeSettings }) {
   );
 }
 
-function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox, onExportBackup, onImportBackup }) {
+function SettingsPage({ settings, onChangeSettings, onEditCategory, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox, onExportBackup, onImportBackup }) {
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
@@ -6040,7 +6202,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
         </div>
       </Card>
 
-      <CategoriesSettingsSection settings={settings} onChangeSettings={onChangeSettings} />
+      <CategoriesSettingsSection settings={settings} onChangeSettings={onChangeSettings} onEditCategory={onEditCategory} />
 
       <VisibilitySettingsSection settings={settings} onChangeSettings={onChangeSettings} />
 
@@ -6896,6 +7058,27 @@ export default function App() {
   function changeSettings(newSettings) {
     setSettings(newSettings); persist({ settings: newSettings });
   }
+  // Editar uma categoria personalizada (nome, cor ou ícone) em Configurações. Cor/ícone são só
+  // metadados, então basta trocar em settings.customCategories — mas o NOME também é a chave
+  // usada em transaction.category e recurring.category, então, se ele mudar, os lançamentos que
+  // já usavam o nome antigo são atualizados junto, pra não "sumirem" pra Outros silenciosamente.
+  function editCustomCategory(oldName, updated) {
+    const custom = settings.customCategories || [];
+    const newSettings = { ...settings, customCategories: custom.map((c) => (c.name === oldName ? updated : c)) };
+    setSettings(newSettings);
+    if (updated.name === oldName) {
+      persist({ settings: newSettings });
+      addToast('Categoria atualizada.');
+      return;
+    }
+    const affected = transactions.filter((t) => t.category === oldName).length + recurring.filter((r) => r.category === oldName).length;
+    const newTransactions = transactions.map((t) => (t.category === oldName ? { ...t, category: updated.name } : t));
+    const newRecurring = recurring.map((r) => (r.category === oldName ? { ...r, category: updated.name } : r));
+    setTransactions(newTransactions);
+    setRecurring(newRecurring);
+    persist({ settings: newSettings, transactions: newTransactions, recurring: newRecurring });
+    addToast(affected > 0 ? `Categoria renomeada — ${affected} lançamento(s) atualizado(s).` : 'Categoria renomeada.');
+  }
   function resetToSampleData() {
     const t = buildInitialTransactions();
     setTransactions(t); setAccounts(initialAccounts); setCards(initialCards);
@@ -7045,7 +7228,7 @@ export default function App() {
               {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} transactions={data.transactions} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
-                  settings={settings} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
+                  settings={settings} onChangeSettings={changeSettings} onEditCategory={editCustomCategory} onReset={resetToSampleData} onClearData={clearAllData}
                   dropboxConnected={dropboxConnected} dropboxBusy={dropboxBusy} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError}
                   onConnectDropbox={connectDropbox} onDisconnectDropbox={disconnectDropboxAccount}
                   onBackupNow={backupNowToDropbox} onRestoreFromDropbox={restoreFromDropbox}
