@@ -14,6 +14,7 @@ import {
   Plane, Laptop, Award, Briefcase, Clock, ArrowRight, FileText, Loader2, Cloud,
   MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding, Copy, Smartphone, MoreVertical,
   Bookmark, ArrowRightCircle,
+  PawPrint, Baby, Gift, Wrench, Shield, Coffee, Wifi, Tv, Gamepad2, BookOpen, Scissors, Fuel, Stethoscope, Pill,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -245,18 +246,35 @@ const CATEGORY_COLOR_PALETTE = COLOR_PALETTE.flatMap((c) => [
 ]);
 
 let CATEGORIES = { ...BASE_CATEGORIES };
-let CATEGORY_NAMES = Object.keys(CATEGORIES);
+let CATEGORY_NAMES = sortCategoryNames(Object.keys(CATEGORIES));
+// Traduz o nome ORIGINAL de uma categoria base (ex: "Mercado", a chave fixa usada no
+// reconhecimento automático de lançamentos) pro nome ATUAL dela, depois de possíveis edições —
+// ex: se o usuário renomeou "Mercado" pra "Super", guessCategory() continua encontrando
+// "Mercado" pelas palavras-chave, mas precisa devolver "Super" pro lançamento novo cair na
+// categoria certa. Reconstruída junto com CATEGORIES a cada render.
+let CATEGORY_NAME_MAP = {};
 // Reconstrói o conjunto "efetivo" de categorias a partir das configurações: começa do conjunto
-// base, tira as ocultadas pelo usuário (nunca "Outros", que é o fallback universal usado em todo
-// lugar que faz CATEGORIES[nome] || CATEGORIES['Outros']) e acrescenta as personalizadas. Chamada
-// direto no corpo do App a cada render — não precisa de efeito, já que precisa estar pronta ANTES
-// dos componentes filhos lerem CATEGORIES nesse mesmo render.
+// base, aplica edições (nome/cor/ícone) feitas pelo usuário em categorias base, tira as
+// ocultadas (nunca "Outros", que é o fallback universal usado em todo lugar que faz
+// CATEGORIES[nome] || CATEGORIES['Outros']) e acrescenta as personalizadas. Chamada direto no
+// corpo do App a cada render — não precisa de efeito, já que precisa estar pronta ANTES dos
+// componentes filhos lerem CATEGORIES nesse mesmo render.
 function rebuildCategories(settings) {
   const hidden = settings?.hiddenCategories || [];
+  const overrides = settings?.categoryOverrides || {};
   const custom = settings?.customCategories || [];
   const merged = {};
-  Object.entries(BASE_CATEGORIES).forEach(([name, meta]) => {
-    if (name === 'Outros' || !hidden.includes(name)) merged[name] = meta;
+  const nameMap = {};
+  Object.entries(BASE_CATEGORIES).forEach(([originalName, meta]) => {
+    nameMap[originalName] = originalName;
+    if (originalName !== 'Outros' && hidden.includes(originalName)) return;
+    const ov = overrides[originalName];
+    if (!ov) { merged[originalName] = meta; return; }
+    const displayName = ov.name?.trim() || originalName;
+    const icon = ICON_LIBRARY[ov.icon] || SHAPE_ICONS[ov.icon] || meta.icon;
+    const color = ov.color || meta.color;
+    merged[displayName] = { color, soft: ov.color ? softTint(color) : meta.soft, icon, baseKey: originalName };
+    nameMap[originalName] = displayName;
   });
   custom.forEach((c) => {
     // c.icon é o novo formato — chave da ICON_LIBRARY (ex: "Home") OU de SHAPE_ICONS (ex:
@@ -265,10 +283,11 @@ function rebuildCategories(settings) {
     // geométrica) — mantido como alternativa aqui pra categorias já salvas continuarem
     // funcionando sem precisar de uma migração dos dados salvos.
     const icon = ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon;
-    merged[c.name] = { color: c.color, soft: `${c.color}29`, icon };
+    merged[c.name] = { color: c.color, soft: softTint(c.color), icon };
   });
   CATEGORIES = merged;
-  CATEGORY_NAMES = Object.keys(CATEGORIES);
+  CATEGORY_NAMES = sortCategoryNames(Object.keys(CATEGORIES));
+  CATEGORY_NAME_MAP = nameMap;
 }
 
 const ACCOUNTS_ICONS = { 'Conta Corrente': Wallet, 'Poupança': PiggyBank };
@@ -560,7 +579,7 @@ function computeCategoryTotalsForPeriod(transactions, period, customRange) {
     transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= customRange.start && t.date <= customRange.end).forEach(add);
     return totals;
   }
-  const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
+  const monthsToTake = period === 'mes' ? 1 : period === 'bimestre' ? 2 : period === 'trimestre' ? 3 : 12;
   const now = new Date();
   const startStr = ymd(new Date(now.getFullYear(), now.getMonth() - (monthsToTake - 1), 1));
   // Limite superior = fim do mês atual. Sem isso, as recorrências e parcelas já pré-geradas no
@@ -842,7 +861,10 @@ const CATEGORY_KEYWORDS = [
 function guessCategory(title) {
   const t = stripDiacritics(String(title || '')).toLowerCase();
   for (const group of CATEGORY_KEYWORDS) {
-    if (group.keywords.some((k) => t.includes(stripDiacritics(k).toLowerCase()))) return group.category;
+    if (group.keywords.some((k) => t.includes(stripDiacritics(k).toLowerCase()))) {
+      // Traduz pelo nome atual, caso essa categoria base tenha sido renomeada nas configurações.
+      return CATEGORY_NAME_MAP[group.category] || group.category;
+    }
   }
   return 'Outros';
 }
@@ -1063,12 +1085,12 @@ const initialGoals = [
 // (string) tanto em goal.icon quanto em customCategory.icon, então funciona como uma chave
 // estável independente de qual variável local o ícone importado do lucide-react tem aqui.
 const ICON_LIBRARY = {
-  Home, Building2, Landmark,
-  ShoppingCart, ShoppingBag, CreditCard, Banknote, Wallet, PiggyBank,
-  Utensils, Car, Bike, Plane,
-  Heart, Flower2, Sprout,
-  Film, Sparkles, Bookmark,
-  GraduationCap, Briefcase, Laptop, Smartphone, MessageCircle,
+  Home, Building2, Landmark, Wrench, Shield,
+  ShoppingCart, ShoppingBag, CreditCard, Banknote, Wallet, PiggyBank, Gift,
+  Utensils, Coffee, Car, Fuel, Bike, Plane,
+  Heart, Stethoscope, Pill, Flower2, Scissors, Sprout, PawPrint, Baby,
+  Film, Tv, Gamepad2, Sparkles, Bookmark, BookOpen,
+  GraduationCap, Briefcase, Laptop, Smartphone, Wifi, MessageCircle,
   Shirt, Award, PersonStanding, Target,
   MoreHorizontal,
 };
@@ -1103,6 +1125,24 @@ function rgbToHex({ r, g, b }) {
 function mixHex(hexA, hexB, t) {
   const a = hexToRgb(hexA), b = hexToRgb(hexB);
   return rgbToHex({ r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t });
+}
+// Fundo clarinho de um ícone de categoria/meta a partir da cor escolhida — sempre um tom pastel
+// sólido (não transparente): usar transparência (ex: "${color}29") faz o fundo parecer sujo/
+// escuro no modo escuro, porque ele se mistura com o fundo do card em vez de ficar sempre claro
+// como os das categorias originais do app (que usam tons sólidos escolhidos à mão).
+function softTint(hex) {
+  return mixHex(hex, '#FFFFFF', 0.85);
+}
+// Ordena nomes de categoria em ordem alfabética, com "Outros" sempre por último — usado em toda
+// lista/seletor de categorias do app (Object.keys, por si só, preserva a ordem de inserção, que
+// dependia de quando cada categoria foi criada; isso deixava categorias novas espalhadas sem
+// critério nos seletores).
+function sortCategoryNames(names) {
+  return [...names].sort((a, b) => {
+    if (a === 'Outros') return 1;
+    if (b === 'Outros') return -1;
+    return a.localeCompare(b, 'pt-BR');
+  });
 }
 
 const initialCaixinhas = [
@@ -1972,7 +2012,7 @@ function useClickOutside(ref, onOutside, active) {
 function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
-  const labels = { mes: 'Este mês', trimestre: 'Trimestre', ano: 'Ano', personalizado: 'Personalizado' };
+  const labels = { mes: 'Este mês', bimestre: 'Bimestral', trimestre: 'Trimestral', ano: 'Ano', personalizado: 'Personalizado' };
   return (
     <>
       <button
@@ -2008,19 +2048,8 @@ function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   );
 }
 
-function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen, insights }) {
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifRef = useRef(null);
+function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen }) {
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [dismissed, setDismissed] = useState(() => {
-    try { return new Set(JSON.parse(window.localStorage.getItem('cerne-dismissed-notifications-v1')) || []); } catch { return new Set(); }
-  });
-  const visibleInsights = insights.filter((n) => !dismissed.has(n.text));
-  function dismissNotification(text) {
-    const updated = new Set(dismissed); updated.add(text);
-    setDismissed(updated);
-    try { window.localStorage.setItem('cerne-dismissed-notifications-v1', JSON.stringify([...updated])); } catch { /* melhor esforço */ }
-  }
   const today = capitalizeFirst(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
   return (
     <header className="sticky top-0 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-6 lg:px-8 py-3 sm:py-4 no-print" style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
@@ -2097,32 +2126,6 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
       <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
         <PeriodSelector period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} />
       </div>
-      <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
-        <button ref={notifRef} onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
-          <Bell size={18} color="var(--text-soft)" />
-          {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
-        </button>
-        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="center" className="p-2">
-          {visibleInsights.length === 0 ? (
-            <div className="px-3 py-4 text-center">
-              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
-            </div>
-          ) : (
-            visibleInsights.map((n, i) => {
-              const Icon = n.icon || Info;
-              return (
-                <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
-                  <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
-                  <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
-                  <button onClick={() => dismissNotification(n.text)} className="p-2 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
-                    <X size={13} color="var(--text-soft)" />
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </Popover>
-      </div>
     </header>
   );
 }
@@ -2153,7 +2156,7 @@ function computeKPIs(period, customRange, mh, transactions, accounts, cards, goa
     receitas = filtered.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
     despesas = filtered.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
   } else {
-    const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
+    const monthsToTake = period === 'mes' ? 1 : period === 'bimestre' ? 2 : period === 'trimestre' ? 3 : 12;
     const slice = mh.slice(-monthsToTake);
     receitas = slice.reduce((s, m) => s + m.receitas, 0);
     despesas = slice.reduce((s, m) => s + m.despesas, 0);
@@ -2526,7 +2529,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
   // Metas antigas (criadas antes da cor personalizável) não têm goal.color — continuam na cor
   // de destaque do sistema, como sempre foi.
   const accent = goal.color || 'var(--primary)';
-  const accentSoft = goal.color ? `${goal.color}29` : 'var(--primary-soft)';
+  const accentSoft = goal.color ? softTint(goal.color) : 'var(--primary-soft)';
   const percent = Math.min(100, (goal.current / goal.target) * 100);
   const [adding, setAdding] = useState(false);
   const [amount, setAmount] = useState(0);
@@ -2865,7 +2868,7 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // como um botão pequeno embutido na própria linha.
 function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, subview, onPayInvoice, gradient }) {
   const [showPayModal, setShowPayModal] = useState(false);
-  const { cycleInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
+  const { pendingInvoice, cycleInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
     // lançamentos usa na subview "Fatura". Antes, no mês corrente (offset 0), essa linha
     // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
@@ -2874,6 +2877,11 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
       && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
     const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
+    // Só o que ainda está Pendente no ciclo — é esse valor (não o total do ciclo) que precisa ser
+    // cobrado ao clicar "Pagar fatura". Sem essa distinção, uma fatura paga parcialmente (ex:
+    // adiantou o pagamento e depois surgiu uma compra nova no mesmo ciclo) cobraria de novo o
+    // valor JÁ pago, descontando duas vezes da conta.
+    const pendingInvoice = cycleItems.filter((t) => t.status === 'Pendente').reduce((s, t) => s + t.amount, 0);
     // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
     // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
     // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
@@ -2887,8 +2895,11 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
     const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
     const isPayable = dueCycle.year === year && dueCycle.month === month;
-    return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
+    return { pendingInvoice, cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
   }, [card, transactions, year, month, subview]);
+  // Só mostra "Total X / A pagar Y" separado quando os dois valores realmente diferem (fatura
+  // paga parcialmente) — se está tudo pendente ou tudo pago, um valor só já basta.
+  const isPartiallyPaid = subview === 'fatura' && pendingInvoice > 0 && pendingInvoice < cycleInvoice;
 
   return (
     <div
@@ -2906,15 +2917,22 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
         <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
       <div className="text-right shrink-0">
-        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
-        {subview === 'fatura' && isPayable && (cycleInvoice > 0 ? (
+        {isPartiallyPaid ? (
+          <>
+            <p className="text-[11px]" style={{ color: 'var(--text-soft)' }}>Total {formatBRL(cycleInvoice)}</p>
+            <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(pendingInvoice)} a pagar</p>
+          </>
+        ) : (
+          <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
+        )}
+        {subview === 'fatura' && isPayable && (pendingInvoice > 0 ? (
           <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-xs font-medium px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>Pagar fatura</button>
         ) : (
           <span className="text-xs font-medium px-2.5 py-1 rounded-lg flex items-center justify-end gap-1" style={{ backgroundColor: 'var(--income-soft)', color: 'var(--income)' }}><Check size={10} /> Em dia</span>
         ))}
       </div>
       {showPayModal && (
-        <PayInvoiceModal card={card} amount={cycleInvoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, cycleInvoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
+        <PayInvoiceModal card={card} amount={pendingInvoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, pendingInvoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
       )}
     </div>
   );
@@ -4854,7 +4872,17 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
 }
 
 function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
-  const [monthOffset, setMonthOffset] = useState(0);
+  // Se a fatura do mês atual de TODOS os cartões já está em dia (nada pendente no ciclo aberto
+  // agora), abre a aba direto no mês seguinte — bom pra quem gosta de adiantar o pagamento e não
+  // precisa ficar vendo uma fatura zerada toda vez. Calculado só na primeira renderização (ao
+  // abrir a aba): se surgir um lançamento novo no mês atual depois disso, "Hoje" no seletor de
+  // mês volta pra ele a qualquer momento — e a linha do cartão já mostra "Total X / Y a pagar"
+  // nesse caso (CardInvoiceRow, acima), então nada fica escondido.
+  const [monthOffset, setMonthOffset] = useState(() => {
+    if (cards.length === 0) return 0;
+    const allSettled = cards.every((c) => computeCardInvoice(c, transactions) === 0);
+    return allSettled ? 1 : 0;
+  });
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -6023,7 +6051,7 @@ function CategoryForm({ initial, existingNames, onSave, onClose }) {
           </div>
         </div>
         <div className="rounded-xl p-3 flex items-center gap-3" style={{ backgroundColor: 'var(--bg)' }}>
-          <IconCircle icon={PreviewIcon} color={color} soft={`${color}29`} size={36} />
+          <IconCircle icon={PreviewIcon} color={color} soft={softTint(color)} size={36} />
           <span className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{name.trim() || 'Pré-visualização'}</span>
         </div>
         <div className="flex justify-end gap-3 pt-2">
@@ -6035,35 +6063,69 @@ function CategoryForm({ initial, existingNames, onSave, onClose }) {
   );
 }
 
-// Gerenciamento de categorias em Configurações: ocultar categorias do conjunto base (viram
-// "Outros" em qualquer lançamento antigo que já as usava, mas sem apagar nada — e dá pra
-// restaurar depois) e criar até 3 personalizadas, com cor da paleta expandida e um ícone da
-// biblioteca compartilhada com as metas. Categorias personalizadas aceitam swipe pra editar
-// (nome, cor e ícone) ou excluir, igual às outras listas do app.
+// Encontra a chave da ICON_LIBRARY que corresponde a um componente de ícone já resolvido (usado
+// pra pré-selecionar o ícone certo ao editar uma categoria base que nunca foi personalizada —
+// nesse caso não existe uma "chave" salva ainda, só o componente original de BASE_CATEGORIES).
+const ICON_LIBRARY_KEYS = new Map(Object.entries(ICON_LIBRARY).map(([key, Icon]) => [Icon, key]));
+function iconToKey(IconComponent) {
+  return ICON_LIBRARY_KEYS.get(IconComponent) || 'Home';
+}
+
+// Gerenciamento de categorias em Configurações: todas as categorias — base ou personalizada —
+// aparecem numa lista só, em ordem alfabética, com swipe pra editar (nome, cor e ícone) ou
+// remover. "Remover" numa categoria base apenas oculta (reversível, num painel "Ocultas" logo
+// abaixo — "Outros" nunca aparece aqui, é o fallback universal e não pode ser ocultado ou
+// editado); numa personalizada, exclui de vez. Cor vem da paleta expandida de 22 tons, ícone da
+// biblioteca compartilhada com as metas.
 function CategoriesSettingsSection({ settings, onChangeSettings, onEditCategory }) {
   const hidden = settings.hiddenCategories || [];
+  const overrides = settings.categoryOverrides || {};
   const custom = settings.customCategories || [];
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingCategory, setEditingCategory] = useState(null);
+  const [editingRow, setEditingRow] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(null);
-  const builtIn = Object.keys(BASE_CATEGORIES).filter((n) => n !== 'Outros');
-  const allNames = [...builtIn, ...custom.map((c) => c.name)];
+
+  const baseRows = Object.entries(BASE_CATEGORIES)
+    .filter(([key]) => key !== 'Outros' && !hidden.includes(key))
+    .map(([key, meta]) => {
+      const ov = overrides[key];
+      return {
+        baseKey: key,
+        name: ov?.name?.trim() || key,
+        color: ov?.color || meta.color,
+        icon: ov?.icon || iconToKey(meta.icon),
+        iconComponent: ov?.icon ? (ICON_LIBRARY[ov.icon] || SHAPE_ICONS[ov.icon] || meta.icon) : meta.icon,
+      };
+    });
+  const customRows = custom.map((c) => ({
+    baseKey: null,
+    name: c.name,
+    color: c.color,
+    icon: c.icon || c.shape,
+    iconComponent: ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon,
+  }));
+  const rows = [...baseRows, ...customRows].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const allNames = rows.map((r) => r.name);
 
   function addCategory(data) {
     if (custom.length >= 3) return;
     onChangeSettings({ ...settings, customCategories: [...custom, data] });
     setShowAddForm(false);
   }
-  function saveEditedCategory(data) {
-    onEditCategory(editingCategory.name, data);
-    setEditingCategory(null);
+  function saveEditedRow(data) {
+    if (editingRow.baseKey) {
+      onEditCategory(editingRow.baseKey, editingRow.name, data, true);
+    } else {
+      onEditCategory(editingRow.name, editingRow.name, data, false);
+    }
+    setEditingRow(null);
   }
   function confirmAndRemove() {
-    const name = confirmRemove;
-    if (custom.some((c) => c.name === name)) {
-      onChangeSettings({ ...settings, customCategories: custom.filter((c) => c.name !== name) });
+    const row = confirmRemove;
+    if (row.baseKey) {
+      onChangeSettings({ ...settings, hiddenCategories: [...hidden, row.baseKey] });
     } else {
-      onChangeSettings({ ...settings, hiddenCategories: [...hidden, name] });
+      onChangeSettings({ ...settings, customCategories: custom.filter((c) => c.name !== row.name) });
     }
     setConfirmRemove(null);
   }
@@ -6071,48 +6133,44 @@ function CategoriesSettingsSection({ settings, onChangeSettings, onEditCategory 
   return (
     <Card>
       <SectionTitle subtitle="Escolha quais categorias aparecem na hora de lançar, e crie até 3 novas.">Categorias</SectionTitle>
-      <div className="space-y-1">
-        {builtIn.map((name) => {
-          const isHidden = hidden.includes(name);
-          const meta = BASE_CATEGORIES[name];
-          return (
-            <div key={name} className="flex items-center justify-between gap-3 py-1.5">
+      <div className="space-y-1.5">
+        {rows.map((row) => (
+          <SwipeableRow
+            key={row.baseKey || row.name} onEdit={() => setEditingRow(row)} onDelete={() => setConfirmRemove(row)}
+            deleteConfirm={{
+              title: row.baseKey ? 'Ocultar categoria' : 'Excluir categoria',
+              description: row.baseKey
+                ? `"${row.name}" deixa de aparecer na hora de lançar. Lançamentos que já usam essa categoria não são afetados, e dá pra restaurar quando quiser. Quer mesmo ocultar?`
+                : `Lançamentos que já usam "${row.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`,
+            }}
+          >
+            <div className="flex items-center justify-between gap-3 py-1.5 px-1">
               <div className="flex items-center gap-2.5 min-w-0">
-                <IconCircle icon={meta.icon} color={meta.color} soft={meta.soft} size={30} />
-                <span className="text-sm truncate" style={{ color: isHidden ? 'var(--text-soft)' : 'var(--text)', textDecoration: isHidden ? 'line-through' : 'none' }}>{name}</span>
+                <IconCircle icon={row.iconComponent} color={row.color} soft={softTint(row.color)} size={30} />
+                <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{row.name}</span>
               </div>
-              {isHidden ? (
-                <button onClick={() => onChangeSettings({ ...settings, hiddenCategories: hidden.filter((n) => n !== name) })} className="text-xs font-medium shrink-0" style={{ color: 'var(--primary)' }}>Restaurar</button>
-              ) : (
-                <button onClick={() => setConfirmRemove(name)} className="text-xs font-medium shrink-0" style={{ color: 'var(--text-soft)' }}>Remover</button>
-              )}
+              <Pencil size={14} color="var(--text-soft)" className="shrink-0" />
             </div>
-          );
-        })}
-        {custom.length > 0 && (
-          <div className="pt-1 space-y-1.5">
-            {custom.map((c) => {
-              const ShapeIcon = ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon;
-              return (
-                <SwipeableRow
-                  key={c.name} onEdit={() => setEditingCategory(c)} onDelete={() => setConfirmRemove(c.name)}
-                  deleteConfirm={{ title: 'Excluir categoria', description: `Lançamentos que já usam "${c.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?` }}
-                >
-                  <div className="flex items-center justify-between gap-3 py-1.5 px-1">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <IconCircle icon={ShapeIcon} color={c.color} soft={`${c.color}29`} size={30} />
-                      <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</span>
-                      <Badge color="var(--primary)" soft="var(--primary-soft)">Nova</Badge>
-                    </div>
-                    <Pencil size={14} color="var(--text-soft)" className="shrink-0" />
-                  </div>
-                </SwipeableRow>
-              );
-            })}
-            <p className="text-[11px] px-1" style={{ color: 'var(--text-soft)' }}>Arraste uma categoria nova pra esquerda pra editar ou excluir</p>
-          </div>
-        )}
+          </SwipeableRow>
+        ))}
+        <p className="text-[11px] px-1 pt-0.5" style={{ color: 'var(--text-soft)' }}>Arraste uma categoria pra esquerda pra editar ou {custom.length > 0 ? 'ocultar/excluir' : 'ocultar'}</p>
       </div>
+
+      {hidden.length > 0 && (
+        <div className="mt-4 pt-4 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
+          <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-soft)' }}>Ocultas</p>
+          {hidden.map((key) => {
+            const ov = overrides[key];
+            const displayName = ov?.name?.trim() || key;
+            return (
+              <div key={key} className="flex items-center justify-between gap-3 py-1">
+                <span className="text-sm truncate" style={{ color: 'var(--text-soft)', textDecoration: 'line-through' }}>{displayName}</span>
+                <button onClick={() => onChangeSettings({ ...settings, hiddenCategories: hidden.filter((n) => n !== key) })} className="text-xs font-medium shrink-0" style={{ color: 'var(--primary)' }}>Restaurar</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
         {custom.length >= 3 ? (
@@ -6125,18 +6183,20 @@ function CategoriesSettingsSection({ settings, onChangeSettings, onEditCategory 
       {showAddForm && (
         <CategoryForm existingNames={allNames} onSave={addCategory} onClose={() => setShowAddForm(false)} />
       )}
-      {editingCategory && (
+      {editingRow && (
         <CategoryForm
-          initial={editingCategory}
-          existingNames={allNames.filter((n) => n !== editingCategory.name)}
-          onSave={saveEditedCategory}
-          onClose={() => setEditingCategory(null)}
+          initial={editingRow}
+          existingNames={allNames.filter((n) => n !== editingRow.name)}
+          onSave={saveEditedRow}
+          onClose={() => setEditingRow(null)}
         />
       )}
       {confirmRemove && (
         <ConfirmModal
-          title="Excluir categoria"
-          description={`Lançamentos que já usam "${confirmRemove}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`}
+          title={confirmRemove.baseKey ? 'Ocultar categoria' : 'Excluir categoria'}
+          description={confirmRemove.baseKey
+            ? `"${confirmRemove.name}" deixa de aparecer na hora de lançar. Lançamentos que já usam essa categoria não são afetados, e dá pra restaurar quando quiser. Quer mesmo ocultar?`
+            : `Lançamentos que já usam "${confirmRemove.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`}
           onConfirm={confirmAndRemove}
           onClose={() => setConfirmRemove(null)}
         />
@@ -7058,22 +7118,32 @@ export default function App() {
   function changeSettings(newSettings) {
     setSettings(newSettings); persist({ settings: newSettings });
   }
-  // Editar uma categoria personalizada (nome, cor ou ícone) em Configurações. Cor/ícone são só
-  // metadados, então basta trocar em settings.customCategories — mas o NOME também é a chave
-  // usada em transaction.category e recurring.category, então, se ele mudar, os lançamentos que
-  // já usavam o nome antigo são atualizados junto, pra não "sumirem" pra Outros silenciosamente.
-  function editCustomCategory(oldName, updated) {
-    const custom = settings.customCategories || [];
-    const newSettings = { ...settings, customCategories: custom.map((c) => (c.name === oldName ? updated : c)) };
+  // Editar uma categoria (base ou personalizada) em Configurações. Cor/ícone são só metadados,
+  // então basta trocar nas configurações — mas o NOME também é a chave usada em
+  // transaction.category e recurring.category, então, se ele mudar, os lançamentos que já
+  // usavam o nome antigo são atualizados junto, pra não "sumirem" pra Outros silenciosamente.
+  // Numa categoria base, `identifier` é a chave original fixa (ex: "Mercado", que nunca muda —
+  // é o que o reconhecimento automático de lançamentos usa por baixo dos panos) e a edição vira
+  // um "override" guardado à parte, preservando o conjunto base intacto. Numa personalizada,
+  // `identifier` é o próprio nome atual dela.
+  function editCategory(identifier, oldDisplayName, updated, isBase) {
+    let newSettings;
+    if (isBase) {
+      const overrides = settings.categoryOverrides || {};
+      newSettings = { ...settings, categoryOverrides: { ...overrides, [identifier]: updated } };
+    } else {
+      const custom = settings.customCategories || [];
+      newSettings = { ...settings, customCategories: custom.map((c) => (c.name === identifier ? updated : c)) };
+    }
     setSettings(newSettings);
-    if (updated.name === oldName) {
+    if (updated.name === oldDisplayName) {
       persist({ settings: newSettings });
       addToast('Categoria atualizada.');
       return;
     }
-    const affected = transactions.filter((t) => t.category === oldName).length + recurring.filter((r) => r.category === oldName).length;
-    const newTransactions = transactions.map((t) => (t.category === oldName ? { ...t, category: updated.name } : t));
-    const newRecurring = recurring.map((r) => (r.category === oldName ? { ...r, category: updated.name } : r));
+    const affected = transactions.filter((t) => t.category === oldDisplayName).length + recurring.filter((r) => r.category === oldDisplayName).length;
+    const newTransactions = transactions.map((t) => (t.category === oldDisplayName ? { ...t, category: updated.name } : t));
+    const newRecurring = recurring.map((r) => (r.category === oldDisplayName ? { ...r, category: updated.name } : r));
     setTransactions(newTransactions);
     setRecurring(newRecurring);
     persist({ settings: newSettings, transactions: newTransactions, recurring: newRecurring });
@@ -7193,7 +7263,7 @@ export default function App() {
       <Sidebar activePage={activePage} setActivePage={goTo} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} onNewTransaction={() => setModal({ type: 'newTransaction' })} dropboxConnected={dropboxConnected} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError} onGoToSettings={() => goTo('configuracoes')} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
+        <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} />
         {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
 
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
@@ -7228,7 +7298,7 @@ export default function App() {
               {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} transactions={data.transactions} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
-                  settings={settings} onChangeSettings={changeSettings} onEditCategory={editCustomCategory} onReset={resetToSampleData} onClearData={clearAllData}
+                  settings={settings} onChangeSettings={changeSettings} onEditCategory={editCategory} onReset={resetToSampleData} onClearData={clearAllData}
                   dropboxConnected={dropboxConnected} dropboxBusy={dropboxBusy} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError}
                   onConnectDropbox={connectDropbox} onDisconnectDropbox={disconnectDropboxAccount}
                   onBackupNow={backupNowToDropbox} onRestoreFromDropbox={restoreFromDropbox}
