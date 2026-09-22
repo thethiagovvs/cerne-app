@@ -2846,7 +2846,7 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
           <FieldLabel>Debitar de qual conta?</FieldLabel>
           <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
             <option value="">Nenhuma (só marcar como paga)</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
           </Select>
           <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
             {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
@@ -2868,7 +2868,7 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // como um botão pequeno embutido na própria linha.
 function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, subview, onPayInvoice, gradient }) {
   const [showPayModal, setShowPayModal] = useState(false);
-  const { pendingInvoice, cycleInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
+  const { pendingInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
     // lançamentos usa na subview "Fatura". Antes, no mês corrente (offset 0), essa linha
     // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
@@ -2876,7 +2876,6 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
     const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
       && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
-    const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
     // Só o que ainda está Pendente no ciclo — é esse valor (não o total do ciclo) que precisa ser
     // cobrado ao clicar "Pagar fatura". Sem essa distinção, uma fatura paga parcialmente (ex:
     // adiantou o pagamento e depois surgiu uma compra nova no mesmo ciclo) cobraria de novo o
@@ -2895,11 +2894,8 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
     const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
     const isPayable = dueCycle.year === year && dueCycle.month === month;
-    return { pendingInvoice, cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
+    return { pendingInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
   }, [card, transactions, year, month, subview]);
-  // Só mostra "Total X / A pagar Y" separado quando os dois valores realmente diferem (fatura
-  // paga parcialmente) — se está tudo pendente ou tudo pago, um valor só já basta.
-  const isPartiallyPaid = subview === 'fatura' && pendingInvoice > 0 && pendingInvoice < cycleInvoice;
 
   return (
     <div
@@ -2917,14 +2913,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
         <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
       <div className="text-right shrink-0">
-        {isPartiallyPaid ? (
-          <>
-            <p className="text-[11px]" style={{ color: 'var(--text-soft)' }}>Total {formatBRL(cycleInvoice)}</p>
-            <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(pendingInvoice)} a pagar</p>
-          </>
-        ) : (
-          <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
-        )}
+        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
         {subview === 'fatura' && isPayable && (pendingInvoice > 0 ? (
           <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-xs font-medium px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>Pagar fatura</button>
         ) : (
@@ -3272,20 +3261,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const [installmentEnabled, setInstallmentEnabled] = useState(false);
   const [installmentCount, setInstallmentCount] = useState(2);
   const [installmentCountText, setInstallmentCountText] = useState('2');
-  const [installmentTotal, setInstallmentTotal] = useState(0);
-  // 'total': usuário informa o valor total da compra, o valor da parcela é calculado.
-  // 'porParcela': usuário informa o valor de cada parcela, o total é calculado automaticamente
-  // (ex: R$10 em 10x → total R$100) — útil quando você sabe o valor da parcela de cabeça (tipo
-  // uma assinatura) mas não o valor total de bate-pronto.
-  const [installmentInputMode, setInstallmentInputMode] = useState('total');
-  const [installmentPerValue, setInstallmentPerValue] = useState(0);
-
-  useEffect(() => {
-    if (installmentInputMode === 'porParcela') {
-      setInstallmentTotal(Math.round(installmentPerValue * installmentCount * 100) / 100);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [installmentInputMode, installmentPerValue, installmentCount]);
+  const [installmentRawTotal, setInstallmentRawTotal] = useState(0);
+  const [installmentRawPerValue, setInstallmentRawPerValue] = useState(0);
+  // Qual dos dois campos (valor total / valor da parcela) foi digitado por último — é a partir
+  // dele que o outro é recalculado sempre que o número de parcelas muda. Antes, os dois campos
+  // eram alternados por um botão de "modo" e tinham estados independentes — trocar de um pro
+  // outro descartava o valor já preenchido no primeiro. Agora os dois ficam sempre visíveis e
+  // sincronizados, então digitar num não apaga o outro.
+  const [installmentSource, setInstallmentSource] = useState('total');
 
   const cltBreakdown = useMemo(
     () => (form.isSalary ? calcCLTNetSalary(form.grossSalary, form.dependents) : null),
@@ -3362,7 +3345,11 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
 
   const selectedCard = cards.find((c) => c.id === form.cardId);
   const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
-  const perInstallment = installmentCount > 0 ? installmentTotal / installmentCount : 0;
+  // Um dos dois é sempre o "digitado" (installmentSource) e o outro é derivado dele — nunca os
+  // dois guardados em separado, pra nunca ficarem fora de sincronia entre si nem com o número de
+  // parcelas.
+  const installmentTotal = installmentSource === 'total' ? installmentRawTotal : Math.round(installmentRawPerValue * installmentCount * 100) / 100;
+  const perInstallment = installmentSource === 'perValue' ? installmentRawPerValue : (installmentCount > 0 ? Math.round((installmentRawTotal / installmentCount) * 100) / 100 : 0);
   const isEditingInstallment = !!initial?.installmentGroupId;
   const canToggleInstallments = !isEditingInstallment;
   const currentInvoiceCycle = useMemo(
@@ -3519,11 +3506,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div ref={amountRef} className={flashField === 'amount' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
-              {installmentInputMode === 'porParcela' ? (
-                <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(installmentTotal)} <span className="ml-1 text-xs">(calculado)</span></div>
-              ) : (
-                <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
-              )}
+              <CurrencyInput value={installmentTotal} onChange={(v) => { setInstallmentRawTotal(v); setInstallmentSource('total'); }} />
               {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
             </div>
             <div ref={dateRef} className={flashField === 'date' ? 'rounded-xl animate-field-flash' : ''}>
@@ -3598,43 +3581,36 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
         {form.type === 'despesa' && selectedCard && canToggleInstallments && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
             <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
-              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) { setInstallmentTotal(form.amount || 0); setInstallmentInputMode('total'); setInstallmentPerValue(0); } }} className="w-5 h-5 shrink-0 focus-ring" />
+              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) { setInstallmentRawTotal(form.amount || 0); setInstallmentSource('total'); } }} className="w-5 h-5 shrink-0 focus-ring" />
               {initial ? 'Converter em compra parcelada' : 'Compra parcelada'}
             </label>
             {installmentEnabled && (
               <>
-                <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--card)' }}>
-                  <button type="button" onClick={() => setInstallmentInputMode('total')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'total' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor total</button>
-                  <button type="button" onClick={() => setInstallmentInputMode('porParcela')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'porParcela' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor da parcela</button>
-                </div>
-                {installmentInputMode === 'porParcela' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <FieldLabel>Valor de cada parcela</FieldLabel>
-                    <CurrencyInput value={installmentPerValue} onChange={setInstallmentPerValue} />
+                    <FieldLabel>Valor da parcela</FieldLabel>
+                    <CurrencyInput value={perInstallment} onChange={(v) => { setInstallmentRawPerValue(v); setInstallmentSource('perValue'); }} />
                   </div>
-                )}
-                <div>
-                  <FieldLabel>Número de parcelas</FieldLabel>
-                  <input
-                    type="number" inputMode="numeric" min={2} max={48}
-                    value={installmentCountText}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setInstallmentCountText(raw);
-                      const n = Number(raw);
-                      if (raw !== '' && !Number.isNaN(n)) setInstallmentCount(n);
-                    }}
-                    onBlur={() => {
-                      const clamped = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
-                      setInstallmentCount(clamped);
-                      setInstallmentCountText(String(clamped));
-                    }}
-                    className={inputClass} style={inputStyle}
-                  />
-                </div>
-                <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                  {installmentCount}x de {formatBRL(perInstallment)}{installmentInputMode === 'porParcela' && ` — total ${formatBRL(installmentTotal)}`}
+                  <div>
+                    <FieldLabel>Número de parcelas</FieldLabel>
+                    <input
+                      type="number" inputMode="numeric" min={2} max={48}
+                      value={installmentCountText}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setInstallmentCountText(raw);
+                        const n = Number(raw);
+                        if (raw !== '' && !Number.isNaN(n)) setInstallmentCount(n);
+                      }}
+                      onBlur={() => {
+                        const clamped = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
+                        setInstallmentCount(clamped);
+                        setInstallmentCountText(String(clamped));
+                      }}
+                      className={inputClass} style={inputStyle}
+                    />
+                  </div>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
                   {initial
@@ -3867,7 +3843,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   const filtered = useMemo(() => transactions.filter((t) => {
     if (!showCardTx && t.cardId) return false;
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
-    const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = stripDiacritics(t.description).toLowerCase().includes(stripDiacritics(search).toLowerCase());
     const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
     const matchesAccount = accountFilter === 'all' || t.account === accountFilter;
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
@@ -4872,17 +4848,7 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
 }
 
 function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
-  // Se a fatura do mês atual de TODOS os cartões já está em dia (nada pendente no ciclo aberto
-  // agora), abre a aba direto no mês seguinte — bom pra quem gosta de adiantar o pagamento e não
-  // precisa ficar vendo uma fatura zerada toda vez. Calculado só na primeira renderização (ao
-  // abrir a aba): se surgir um lançamento novo no mês atual depois disso, "Hoje" no seletor de
-  // mês volta pra ele a qualquer momento — e a linha do cartão já mostra "Total X / Y a pagar"
-  // nesse caso (CardInvoiceRow, acima), então nada fica escondido.
-  const [monthOffset, setMonthOffset] = useState(() => {
-    if (cards.length === 0) return 0;
-    const allSettled = cards.every((c) => computeCardInvoice(c, transactions) === 0);
-    return allSettled ? 1 : 0;
-  });
+  const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -4981,8 +4947,8 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       const cycle = getCardInvoiceCycle(card, t.date);
       if (cycle.year !== year || cycle.month !== month) return false;
       if (search.trim()) {
-        const q = search.trim().toLowerCase();
-        if (!t.description.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q)) return false;
+        const q = stripDiacritics(search.trim()).toLowerCase();
+        if (!stripDiacritics(t.description).toLowerCase().includes(q) && !stripDiacritics(t.category).toLowerCase().includes(q)) return false;
       }
       return true;
     })
@@ -4995,7 +4961,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       && (cardFilter === 'all' || t.cardId === cardFilter)
       && (paymentMethodFilter === 'all' || t.paymentMethod === paymentMethodFilter)
       && (categoryFilter === 'all' || t.category === categoryFilter)
-      && (!search.trim() || t.description.toLowerCase().includes(search.trim().toLowerCase()) || t.category.toLowerCase().includes(search.trim().toLowerCase())))
+      && (!search.trim() || stripDiacritics(t.description).toLowerCase().includes(stripDiacritics(search.trim()).toLowerCase()) || stripDiacritics(t.category).toLowerCase().includes(stripDiacritics(search.trim()).toLowerCase())))
     .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
@@ -6426,7 +6392,10 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [editingSearchResult, setEditingSearchResult] = useState(null);
   const [toasts, setToasts] = useState([]);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
+  // Guarda o TEXTO de cada aviso já dispensado nesta sessão (não persiste — reaparece se
+  // recarregar a página), não só "já dispensei algo": assim, dispensar o aviso de saldo baixo
+  // não esconde um aviso diferente e mais urgente que surja depois (ex: fatura vencendo hoje).
+  const [dismissedBannerTexts, setDismissedBannerTexts] = useState(() => new Set());
   const [celebration, setCelebration] = useState(null); // { id, origin: {x,y} | null } — explosão de emojis ao concluir uma meta
   function celebrateGoalCompletion(origin) {
     setCelebration({ id: Date.now(), origin });
@@ -7205,10 +7174,10 @@ export default function App() {
 
   const filteredForSearch = useMemo(() => {
     if (!search.trim()) return null;
-    const q = search.toLowerCase().trim();
-    const qAmount = q.replace('.', ',');
+    const q = stripDiacritics(search.trim()).toLowerCase();
+    const qAmount = search.toLowerCase().trim().replace('.', ',');
     return transactions.filter((t) => {
-      if (t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)) return true;
+      if (stripDiacritics(t.description).toLowerCase().includes(q) || stripDiacritics(t.category).toLowerCase().includes(q)) return true;
       const amountStr = t.amount.toFixed(2).replace('.', ',');
       return amountStr.includes(qAmount);
     });
@@ -7264,7 +7233,12 @@ export default function App() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} />
-        {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
+        {(() => {
+          const bannerInsight = insights.find((ins) => !dismissedBannerTexts.has(ins.text));
+          return bannerInsight && (
+            <Banner insight={bannerInsight} onDismiss={() => setDismissedBannerTexts((prev) => new Set(prev).add(bannerInsight.text))} />
+          );
+        })()}
 
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
           {search.trim() ? (
