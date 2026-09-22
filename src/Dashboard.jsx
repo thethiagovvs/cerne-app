@@ -2864,11 +2864,10 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // Versão compacta do cartão pra aba Fatura mensal — uma linha só, em vez do card grande (esse
 // já existe por inteiro na aba "Meus cartões", incluindo limite, vencimento e antecipar
 // parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
-// esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
-// como um botão pequeno embutido na própria linha.
-function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, subview, onPayInvoice, gradient }) {
-  const [showPayModal, setShowPayModal] = useState(false);
-  const { pendingInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
+// esse cartão só; clicar de novo tira a seleção. Só informativa — pagar a fatura (inteira ou por
+// lançamento) é feito na aba "Meus cartões" e dentro de cada lançamento, não aqui.
+function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, month, subview, gradient }) {
+  const { displayInvoice, displayCount } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
     // lançamentos usa na subview "Fatura". Antes, no mês corrente (offset 0), essa linha
     // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
@@ -2876,11 +2875,6 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
     const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
       && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
-    // Só o que ainda está Pendente no ciclo — é esse valor (não o total do ciclo) que precisa ser
-    // cobrado ao clicar "Pagar fatura". Sem essa distinção, uma fatura paga parcialmente (ex:
-    // adiantou o pagamento e depois surgiu uma compra nova no mesmo ciclo) cobraria de novo o
-    // valor JÁ pago, descontando duas vezes da conta.
-    const pendingInvoice = cycleItems.filter((t) => t.status === 'Pendente').reduce((s, t) => s + t.amount, 0);
     // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
     // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
     // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
@@ -2888,13 +2882,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     const monthItems = subview === 'todas'
       ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
       : cycleItems;
-    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
-    // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
-    // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
-    // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
-    const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
-    const isPayable = dueCycle.year === year && dueCycle.month === month;
-    return { pendingInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
+    return { displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length };
   }, [card, transactions, year, month, subview]);
 
   return (
@@ -2912,17 +2900,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
         <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
-      <div className="text-right shrink-0">
-        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
-        {subview === 'fatura' && isPayable && (pendingInvoice > 0 ? (
-          <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-xs font-medium px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>Pagar fatura</button>
-        ) : (
-          <span className="text-xs font-medium px-2.5 py-1 rounded-lg flex items-center justify-end gap-1" style={{ backgroundColor: 'var(--income-soft)', color: 'var(--income)' }}><Check size={10} /> Em dia</span>
-        ))}
-      </div>
-      {showPayModal && (
-        <PayInvoiceModal card={card} amount={pendingInvoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, pendingInvoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
-      )}
+      <p className="text-sm font-semibold tabular-nums shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
     </div>
   );
 }
@@ -3630,10 +3608,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <Select value={form.status} disabled={(installmentEnabled && canToggleInstallments) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && canToggleInstallments) || !!form.cardId ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={installmentEnabled && canToggleInstallments} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: installmentEnabled && canToggleInstallments ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
             </Select>
-            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
+            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Marcar como Pago aqui só sinaliza esse lançamento — não desconta de conta nenhuma. Pra pagar (ou adiantar) a fatura de verdade, use a aba Cartões.</p>}
           </div>
         </div>
         {duplicateWarning && (
@@ -4235,6 +4213,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
       {selectionMode && selectedIds.length > 0 && (
         <SelectionActionBar
           count={selectedIds.length}
+          total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
           onClear={exitSelectionMode}
           onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
@@ -4711,7 +4690,7 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 // Barra de ações flutuante da seleção múltipla — some acima do FAB (que fica no canto), pra não
 // se sobrepor a ele. As ações em si (o que cada botão faz) ficam a cargo de quem usa este
 // componente, aqui é só a casca visual + confirmação de excluir (a única ação destrutiva).
-function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
+function SelectionActionBar({ count, total, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <>
@@ -4719,7 +4698,8 @@ function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate
         <button onClick={onClear} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
           <X size={16} /><span className="text-[10px] font-medium leading-none">Fechar</span>
         </button>
-        <span className="text-sm font-semibold px-2 shrink-0">{count}</span>
+        <span className="text-sm font-semibold pl-2 pr-1 shrink-0">{count}</span>
+        {total != null && <span className="text-xs tabular-nums pr-2 shrink-0 opacity-90">· {formatBRL(total)}</span>}
         <div className="flex-1 flex items-center justify-end gap-0.5 overflow-x-auto">
           {onChangePayment && (
             <button onClick={onChangePayment} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
@@ -4847,7 +4827,7 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
   );
 }
 
-function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
+function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
@@ -4986,10 +4966,9 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         <div className="space-y-2 sm:max-w-xl">
           {visibleCards.map((c) => (
             <CardInvoiceRow
-              key={c.id} card={c} transactions={transactions} accounts={accounts}
+              key={c.id} card={c} transactions={transactions}
               selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
               year={year} month={month} subview={subview}
-              onPayInvoice={onPayInvoice}
               gradient={cardGradients[cards.indexOf(c) % cardGradients.length]}
             />
           ))}
@@ -5233,6 +5212,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       {selectionMode && selectedIds.length > 0 && (
         <SelectionActionBar
           count={selectedIds.length}
+          total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
           onClear={exitSelectionMode}
           onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
@@ -5290,7 +5270,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       </div>
 
       {view === 'fatura' ? (
-        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} />
+        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} />
       ) : (
         <>
           <div className="flex justify-center">
