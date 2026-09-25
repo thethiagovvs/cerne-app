@@ -14,6 +14,7 @@ import {
   Plane, Laptop, Award, Briefcase, Clock, ArrowRight, FileText, Loader2, Cloud,
   MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding, Copy, Smartphone, MoreVertical,
   Bookmark, ArrowRightCircle,
+  PawPrint, Baby, Gift, Wrench, Shield, Coffee, Wifi, Tv, Gamepad2, BookOpen, Scissors, Fuel, Stethoscope, Pill,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -100,6 +101,15 @@ const GLOBAL_STYLES = `
 
 .cerne-root.theme-ameixa { --primary: #7D5A82; --primary-dark: #664867; --primary-soft: #EFE7F0; }
 .cerne-root.theme-ameixa.dark { --primary: #B08AB8; --primary-dark: #9B76A3; --primary-soft: #332B36; }
+
+.cerne-root.theme-laranja { --primary: #C97D3A; --primary-dark: #A8672F; --primary-soft: #F3E6D6; }
+.cerne-root.theme-laranja.dark { --primary: #E8A868; --primary-dark: #D6924F; --primary-soft: #3A2E1E; }
+
+.cerne-root.theme-amarelo { --primary: #B99A3A; --primary-dark: #9C8130; --primary-soft: #F2EDD6; }
+.cerne-root.theme-amarelo.dark { --primary: #E0C468; --primary-dark: #CBAF4F; --primary-soft: #362F1B; }
+
+.cerne-root.theme-marrom { --primary: #8B6448; --primary-dark: #74513A; --primary-soft: #EBE1D8; }
+.cerne-root.theme-marrom.dark { --primary: #B89078; --primary-dark: #A37D64; --primary-soft: #332920; }
 
 .cerne-root, .cerne-root * { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif; box-sizing: border-box; }
 .font-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
@@ -197,38 +207,87 @@ const BASE_CATEGORIES = {
 };
 // Ícones em forma geométrica pras categorias personalizadas (o usuário escolhe cor + forma, em
 // vez de escolher entre centenas de ícones). Mesma "interface" de um ícone lucide-react (aceitam
-// size/color), então funcionam em qualquer lugar que já espera um ícone de categoria.
+// size/color), então funcionam em qualquer lugar que já espera um ícone de categoria. Em
+// outline (contorno), não preenchidos — pra ficar no mesmo estilo dos ícones do lucide-react
+// usados no resto do app.
 function ShapeSquareIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3" stroke={color} strokeWidth="2" /></svg>;
 }
 function ShapeCircleIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke={color} strokeWidth="2" /></svg>;
 }
 function ShapeTriangleIcon({ size = 24, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24"><path d="M12 3 L21 20 L3 20 Z" fill={color} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M12 4 L20 19 L4 19 Z" stroke={color} strokeWidth="2" strokeLinejoin="round" /></svg>;
 }
 const SHAPE_ICONS = { square: ShapeSquareIcon, circle: ShapeCircleIcon, triangle: ShapeTriangleIcon };
-const CATEGORY_COLOR_PALETTE = ['#8A9B7D', '#C98A5E', '#D4A574', '#7B93A8', '#C97A7A', '#B98DAF', '#6FA8A0', '#B9A24C', '#6B8FB0', '#A8A398'];
+// Paleta de cores expandida — usada tanto na cor de categorias/metas quanto (as famílias que
+// já existiam) nos temas de destaque do sistema, em Configurações → Aparência. Cada família
+// tem uma variante clara e uma escura, escolhidas pra serem bem diferenciáveis entre si — a
+// paleta antiga de 10 cores tinha vários tons parecidos (vários verde/marrom acinzentados)
+// que ficavam difíceis de distinguir num relance.
+const COLOR_PALETTE = [
+  { key: 'verde', label: 'Verde', escuro: '#5D7052', claro: '#8FA680' },
+  { key: 'azul', label: 'Azul', escuro: '#4A6FA5', claro: '#7CA3D6' },
+  { key: 'roxo', label: 'Roxo', escuro: '#7D5A82', claro: '#B08AB8' },
+  { key: 'rosa', label: 'Rosa', escuro: '#B5677E', claro: '#D98CA0' },
+  { key: 'vermelho', label: 'Vermelho', escuro: '#B5514A', claro: '#E0938C' },
+  { key: 'laranja', label: 'Laranja', escuro: '#C97D3A', claro: '#E8A868' },
+  { key: 'amarelo', label: 'Amarelo', escuro: '#B99A3A', claro: '#E0C468' },
+  { key: 'marrom', label: 'Marrom', escuro: '#8B6448', claro: '#B89078' },
+  { key: 'preto', label: 'Preto', escuro: '#1E1E1E', claro: '#5C5C5C' },
+  { key: 'cinza', label: 'Cinza', escuro: '#767676', claro: '#A8A8A8' },
+  { key: 'branco', label: 'Branco', escuro: '#BFBFBF', claro: '#EDEDED' },
+];
+// Achatada em pares [cor, rótulo] pra popular o seletor de cor de categorias/metas — 22 opções
+// (11 famílias × clara/escura) no lugar das 10 cores soltas de antes.
+const CATEGORY_COLOR_PALETTE = COLOR_PALETTE.flatMap((c) => [
+  { hex: c.escuro, label: `${c.label} escuro` },
+  { hex: c.claro, label: `${c.label} claro` },
+]);
 
 let CATEGORIES = { ...BASE_CATEGORIES };
-let CATEGORY_NAMES = Object.keys(CATEGORIES);
+let CATEGORY_NAMES = sortCategoryNames(Object.keys(CATEGORIES));
+// Traduz o nome ORIGINAL de uma categoria base (ex: "Mercado", a chave fixa usada no
+// reconhecimento automático de lançamentos) pro nome ATUAL dela, depois de possíveis edições —
+// ex: se o usuário renomeou "Mercado" pra "Super", guessCategory() continua encontrando
+// "Mercado" pelas palavras-chave, mas precisa devolver "Super" pro lançamento novo cair na
+// categoria certa. Reconstruída junto com CATEGORIES a cada render.
+let CATEGORY_NAME_MAP = {};
 // Reconstrói o conjunto "efetivo" de categorias a partir das configurações: começa do conjunto
-// base, tira as ocultadas pelo usuário (nunca "Outros", que é o fallback universal usado em todo
-// lugar que faz CATEGORIES[nome] || CATEGORIES['Outros']) e acrescenta as personalizadas. Chamada
-// direto no corpo do App a cada render — não precisa de efeito, já que precisa estar pronta ANTES
-// dos componentes filhos lerem CATEGORIES nesse mesmo render.
+// base, aplica edições (nome/cor/ícone) feitas pelo usuário em categorias base, tira as
+// ocultadas (nunca "Outros", que é o fallback universal usado em todo lugar que faz
+// CATEGORIES[nome] || CATEGORIES['Outros']) e acrescenta as personalizadas. Chamada direto no
+// corpo do App a cada render — não precisa de efeito, já que precisa estar pronta ANTES dos
+// componentes filhos lerem CATEGORIES nesse mesmo render.
 function rebuildCategories(settings) {
   const hidden = settings?.hiddenCategories || [];
+  const overrides = settings?.categoryOverrides || {};
   const custom = settings?.customCategories || [];
   const merged = {};
-  Object.entries(BASE_CATEGORIES).forEach(([name, meta]) => {
-    if (name === 'Outros' || !hidden.includes(name)) merged[name] = meta;
+  const nameMap = {};
+  Object.entries(BASE_CATEGORIES).forEach(([originalName, meta]) => {
+    nameMap[originalName] = originalName;
+    if (originalName !== 'Outros' && hidden.includes(originalName)) return;
+    const ov = overrides[originalName];
+    if (!ov) { merged[originalName] = meta; return; }
+    const displayName = ov.name?.trim() || originalName;
+    const icon = ICON_LIBRARY[ov.icon] || SHAPE_ICONS[ov.icon] || meta.icon;
+    const color = ov.color || meta.color;
+    merged[displayName] = { color, soft: ov.color ? softTint(color) : meta.soft, icon, baseKey: originalName };
+    nameMap[originalName] = displayName;
   });
   custom.forEach((c) => {
-    merged[c.name] = { color: c.color, soft: `${c.color}29`, icon: SHAPE_ICONS[c.shape] || SHAPE_ICONS.square };
+    // c.icon é o novo formato — chave da ICON_LIBRARY (ex: "Home") OU de SHAPE_ICONS (ex:
+    // "square", pra quando nenhum ícone específico combina). c.shape é o formato antigo
+    // (categorias criadas antes da biblioteca de ícones compartilhada só guardavam uma forma
+    // geométrica) — mantido como alternativa aqui pra categorias já salvas continuarem
+    // funcionando sem precisar de uma migração dos dados salvos.
+    const icon = ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon;
+    merged[c.name] = { color: c.color, soft: softTint(c.color), icon };
   });
   CATEGORIES = merged;
-  CATEGORY_NAMES = Object.keys(CATEGORIES);
+  CATEGORY_NAMES = sortCategoryNames(Object.keys(CATEGORIES));
+  CATEGORY_NAME_MAP = nameMap;
 }
 
 const ACCOUNTS_ICONS = { 'Conta Corrente': Wallet, 'Poupança': PiggyBank };
@@ -520,7 +579,7 @@ function computeCategoryTotalsForPeriod(transactions, period, customRange) {
     transactions.filter((t) => t.type === 'despesa' && isRealized(t) && t.date >= customRange.start && t.date <= customRange.end).forEach(add);
     return totals;
   }
-  const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
+  const monthsToTake = period === 'mes' ? 1 : period === 'bimestre' ? 2 : period === 'trimestre' ? 3 : 12;
   const now = new Date();
   const startStr = ymd(new Date(now.getFullYear(), now.getMonth() - (monthsToTake - 1), 1));
   // Limite superior = fim do mês atual. Sem isso, as recorrências e parcelas já pré-geradas no
@@ -802,7 +861,10 @@ const CATEGORY_KEYWORDS = [
 function guessCategory(title) {
   const t = stripDiacritics(String(title || '')).toLowerCase();
   for (const group of CATEGORY_KEYWORDS) {
-    if (group.keywords.some((k) => t.includes(stripDiacritics(k).toLowerCase()))) return group.category;
+    if (group.keywords.some((k) => t.includes(stripDiacritics(k).toLowerCase()))) {
+      // Traduz pelo nome atual, caso essa categoria base tenha sido renomeada nas configurações.
+      return CATEGORY_NAME_MAP[group.category] || group.category;
+    }
   }
   return 'Outros';
 }
@@ -1017,7 +1079,22 @@ const initialGoals = [
     { date: '2026-07-15', amount: 900 },
   ] },
 ];
-const GOAL_ICONS = { Wallet, Plane, Laptop, Award, Home, Car, Bike, Shirt, GraduationCap, Heart, Briefcase, Sprout, PersonStanding, PiggyBank };
+// Biblioteca de ícones compartilhada entre metas e categorias personalizadas — um ícone
+// disponível pra um já fica disponível pro outro, em vez de cada um ter seu próprio conjunto
+// separado (Casa e Carro, por exemplo, fazem sentido nos dois contextos). Guardado por nome
+// (string) tanto em goal.icon quanto em customCategory.icon, então funciona como uma chave
+// estável independente de qual variável local o ícone importado do lucide-react tem aqui.
+const ICON_LIBRARY = {
+  Home, Building2, Landmark, Wrench, Shield,
+  ShoppingCart, ShoppingBag, CreditCard, Banknote, Wallet, PiggyBank, Gift,
+  Utensils, Coffee, Car, Fuel, Bike, Plane,
+  Heart, Stethoscope, Pill, Flower2, Scissors, Sprout, PawPrint, Baby,
+  Film, Tv, Gamepad2, Sparkles, Bookmark, BookOpen,
+  GraduationCap, Briefcase, Laptop, Smartphone, Wifi, MessageCircle,
+  Shirt, Award, PersonStanding, Target,
+  MoreHorizontal,
+};
+const GOAL_ICONS = ICON_LIBRARY;
 
 // Temas de cor de destaque, cada um com uma variante para claro e uma para escuro.
 // As cores semânticas (receita, despesa, investimento, meta, alerta) não mudam entre temas.
@@ -1028,6 +1105,9 @@ const COLOR_THEMES = {
   vermelho: { label: 'Terracota', light: '#A85D4E', dark: '#CC8271' },
   branco: { label: 'Monocromático', light: '#3A3A3A', dark: '#C9C9C9' },
   ameixa: { label: 'Ameixa', light: '#7D5A82', dark: '#B08AB8' },
+  laranja: { label: 'Laranja', light: '#C97D3A', dark: '#E8A868' },
+  amarelo: { label: 'Amarelo', light: '#B99A3A', dark: '#E0C468' },
+  marrom: { label: 'Marrom', light: '#8B6448', dark: '#B89078' },
 };
 
 /* ---------- Derivar tonalidades de uma cor-base (usado nos gradientes dos cartões) ---------- */
@@ -1045,6 +1125,24 @@ function rgbToHex({ r, g, b }) {
 function mixHex(hexA, hexB, t) {
   const a = hexToRgb(hexA), b = hexToRgb(hexB);
   return rgbToHex({ r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t });
+}
+// Fundo clarinho de um ícone de categoria/meta a partir da cor escolhida — sempre um tom pastel
+// sólido (não transparente): usar transparência (ex: "${color}29") faz o fundo parecer sujo/
+// escuro no modo escuro, porque ele se mistura com o fundo do card em vez de ficar sempre claro
+// como os das categorias originais do app (que usam tons sólidos escolhidos à mão).
+function softTint(hex) {
+  return mixHex(hex, '#FFFFFF', 0.85);
+}
+// Ordena nomes de categoria em ordem alfabética, com "Outros" sempre por último — usado em toda
+// lista/seletor de categorias do app (Object.keys, por si só, preserva a ordem de inserção, que
+// dependia de quando cada categoria foi criada; isso deixava categorias novas espalhadas sem
+// critério nos seletores).
+function sortCategoryNames(names) {
+  return [...names].sort((a, b) => {
+    if (a === 'Outros') return 1;
+    if (b === 'Outros') return -1;
+    return a.localeCompare(b, 'pt-BR');
+  });
 }
 
 const initialCaixinhas = [
@@ -1914,7 +2012,7 @@ function useClickOutside(ref, onOutside, active) {
 function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
-  const labels = { mes: 'Este mês', trimestre: 'Trimestre', ano: 'Ano', personalizado: 'Personalizado' };
+  const labels = { mes: 'Este mês', bimestre: 'Bimestral', trimestre: 'Trimestral', ano: 'Ano', personalizado: 'Personalizado' };
   return (
     <>
       <button
@@ -1950,19 +2048,8 @@ function PeriodSelector({ period, setPeriod, customRange, setCustomRange }) {
   );
 }
 
-function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen, insights }) {
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifRef = useRef(null);
+function Header({ period, setPeriod, customRange, setCustomRange, search, setSearch, setSidebarOpen }) {
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [dismissed, setDismissed] = useState(() => {
-    try { return new Set(JSON.parse(window.localStorage.getItem('cerne-dismissed-notifications-v1')) || []); } catch { return new Set(); }
-  });
-  const visibleInsights = insights.filter((n) => !dismissed.has(n.text));
-  function dismissNotification(text) {
-    const updated = new Set(dismissed); updated.add(text);
-    setDismissed(updated);
-    try { window.localStorage.setItem('cerne-dismissed-notifications-v1', JSON.stringify([...updated])); } catch { /* melhor esforço */ }
-  }
   const today = capitalizeFirst(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
   return (
     <header className="sticky top-0 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-6 lg:px-8 py-3 sm:py-4 no-print" style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
@@ -2039,32 +2126,6 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
       <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
         <PeriodSelector period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} />
       </div>
-      <div className={`shrink-0${searchExpanded ? ' hidden sm:block' : ''}`}>
-        <button ref={notifRef} onClick={() => setNotifOpen(!notifOpen)} className="relative h-11 w-11 box-border flex items-center justify-center rounded-xl hover:bg-black/5 focus-ring" style={{ border: '1px solid var(--border)' }} title="Notificações">
-          <Bell size={18} color="var(--text-soft)" />
-          {visibleInsights.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--alert)' }} />}
-        </button>
-        <Popover open={notifOpen} onClose={() => setNotifOpen(false)} triggerRef={notifRef} width={288} align="center" className="p-2">
-          {visibleInsights.length === 0 ? (
-            <div className="px-3 py-4 text-center">
-              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>Nenhum aviso por enquanto.</p>
-            </div>
-          ) : (
-            visibleInsights.map((n, i) => {
-              const Icon = n.icon || Info;
-              return (
-                <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-black/5">
-                  <Icon size={15} className="mt-0.5 shrink-0" color="var(--text-soft)" />
-                  <p className="text-sm flex-1" style={{ color: 'var(--text)' }}>{n.text}</p>
-                  <button onClick={() => dismissNotification(n.text)} className="p-2 rounded-lg hover:bg-black/10 shrink-0" title="Dispensar">
-                    <X size={13} color="var(--text-soft)" />
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </Popover>
-      </div>
     </header>
   );
 }
@@ -2095,7 +2156,7 @@ function computeKPIs(period, customRange, mh, transactions, accounts, cards, goa
     receitas = filtered.filter((t) => t.type === 'receita').reduce((s, t) => s + t.amount, 0);
     despesas = filtered.filter((t) => t.type === 'despesa').reduce((s, t) => s + t.amount, 0);
   } else {
-    const monthsToTake = period === 'mes' ? 1 : period === 'trimestre' ? 3 : 12;
+    const monthsToTake = period === 'mes' ? 1 : period === 'bimestre' ? 2 : period === 'trimestre' ? 3 : 12;
     const slice = mh.slice(-monthsToTake);
     receitas = slice.reduce((s, m) => s + m.receitas, 0);
     despesas = slice.reduce((s, m) => s + m.despesas, 0);
@@ -2464,7 +2525,11 @@ function MonthSummaryPanel({ transactions, kpis }) {
 /* ---------- Metas (preview + cards) ---------- */
 
 function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) {
-  const Icon = GOAL_ICONS[goal.icon] || Target;
+  const Icon = ICON_LIBRARY[goal.icon] || Target;
+  // Metas antigas (criadas antes da cor personalizável) não têm goal.color — continuam na cor
+  // de destaque do sistema, como sempre foi.
+  const accent = goal.color || 'var(--primary)';
+  const accentSoft = goal.color ? softTint(goal.color) : 'var(--primary-soft)';
   const percent = Math.min(100, (goal.current / goal.target) * 100);
   const [adding, setAdding] = useState(false);
   const [amount, setAmount] = useState(0);
@@ -2490,7 +2555,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
   return (
     <Card ref={cardRef} className="animate-fade-up" padding="p-5">
       <div className="flex items-start gap-3 mb-4">
-        <IconCircle icon={Icon} color="var(--primary)" soft="var(--primary-soft)" size={36} />
+        <IconCircle icon={Icon} color={accent} soft={accentSoft} size={36} />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate" style={{ color: 'var(--text)' }}>{goal.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Previsão: {deadlineLabel}</p>
@@ -2506,11 +2571,11 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
         <span className="font-display text-xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(goal.current)}</span>
         <span className="text-xs tabular-nums" style={{ color: 'var(--text-soft)' }}>de {formatBRL(goal.target)}</span>
       </div>
-      <ProgressBar percent={percent} color="var(--primary)" />
+      <ProgressBar percent={percent} color={accent} />
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs font-semibold" style={{ color: 'var(--primary-dark)' }}>{percent.toFixed(0)}% concluído</span>
+        <span className="text-xs font-semibold" style={{ color: accent }}>{percent.toFixed(0)}% concluído</span>
         {!compact && !adding && (
-          <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+          <button onClick={() => setAdding(true)} className="text-xs font-medium flex items-center gap-1" style={{ color: accent }}>
             <Plus size={12} /> Adicionar valor
           </button>
         )}
@@ -2526,7 +2591,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
           {estimate.status === 'ok' && (
             <p className="text-xs flex items-start gap-1.5" style={{ color: 'var(--text-soft)' }}>
-              <TrendingUp size={13} className="mt-0.5 shrink-0" color="var(--primary)" />
+              <TrendingUp size={13} className="mt-0.5 shrink-0" color={accent} />
               <span>No ritmo atual (~{formatBRL(estimate.avgMonthly)}/mês), a meta deve ser concluída em <strong style={{ color: 'var(--text)' }}>{estimate.etaLabel}</strong>.</span>
             </p>
           )}
@@ -2538,7 +2603,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
           )}
           {history.length > 0 && (
             <>
-              <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-medium mt-2 flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+              <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-medium mt-2 flex items-center gap-1" style={{ color: accent }}>
                 {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Histórico de aportes ({history.length})
               </button>
               {showHistory && (
@@ -2546,7 +2611,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
                   {[...history].reverse().map((h, i) => (
                     <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
                       <span style={{ color: 'var(--text-soft)' }}>{formatDate(h.date)}</span>
-                      <span className="tabular-nums font-medium" style={{ color: 'var(--primary-dark)' }}>+{formatBRL(h.amount)}</span>
+                      <span className="tabular-nums font-medium" style={{ color: accent }}>+{formatBRL(h.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -2568,7 +2633,7 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
 }
 
 function GoalForm({ initial, onSave, onClose }) {
-  const [form, setForm] = useState(initial || { name: '', target: 0, current: 0, deadline: '', icon: 'Wallet' });
+  const [form, setForm] = useState(initial || { name: '', target: 0, current: 0, deadline: '', icon: 'Wallet', color: CATEGORY_COLOR_PALETTE[0].hex });
   const [errors, setErrors] = useState({});
   function validate() {
     const e = {};
@@ -2578,6 +2643,7 @@ function GoalForm({ initial, onSave, onClose }) {
     setErrors(e);
     return Object.keys(e).length === 0;
   }
+  const accent = form.color || 'var(--primary)';
   return (
     <Modal title={initial ? 'Editar meta' : 'Nova meta'} onClose={onClose}>
       <div className="space-y-4">
@@ -2608,11 +2674,19 @@ function GoalForm({ initial, onSave, onClose }) {
           {errors.deadline && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.deadline}</p>}
         </div>
         <div>
-          <FieldLabel>Ícone</FieldLabel>
+          <FieldLabel>Cor</FieldLabel>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(GOAL_ICONS).map(([key, Icon]) => (
-              <button key={key} onClick={() => setForm({ ...form, icon: key })} className="p-2.5 rounded-xl" style={{ backgroundColor: form.icon === key ? 'var(--primary-soft)' : 'transparent', border: '1px solid var(--border)' }}>
-                <Icon size={16} color={form.icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+            {CATEGORY_COLOR_PALETTE.map((c) => (
+              <button key={c.hex} type="button" onClick={() => setForm({ ...form, color: c.hex })} title={c.label} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: c.hex, border: accent === c.hex ? '2px solid var(--text)' : '2px solid transparent' }} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Ícone</FieldLabel>
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+            {Object.entries(ICON_LIBRARY).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setForm({ ...form, icon: key })} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: form.icon === key ? `${accent}29` : 'transparent', border: form.icon === key ? `1px solid ${accent}` : '1px solid var(--border)' }}>
+                <Icon size={16} color={form.icon === key ? accent : 'var(--text-soft)'} />
               </button>
             ))}
           </div>
@@ -2643,9 +2717,14 @@ function GoalsSection({ goals, onAddFunds, onDelete, onCompleted, onSeeAll, comp
 
 function FinancialCalendar({ cards, transactions }) {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selectedDay, setSelectedDay] = useState(null);
   const year = viewDate.getFullYear(), month = viewDate.getMonth();
   const cells = getMonthGrid(year, month);
   const weekDays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+  // O dia selecionado só faz sentido dentro do mês em que foi clicado — ao navegar pra outro
+  // mês, o número do dia deixa de se referir ao mesmo lugar, então a seleção é limpa.
+  useEffect(() => { setSelectedDay(null); }, [year, month]);
 
   // Prioriza os gastos e lançamentos de despesas do mês — inclusive os já pagos — para o
   // calendário refletir onde o dinheiro realmente foi, e não só a rotina de fatura do cartão.
@@ -2678,6 +2757,9 @@ function FinancialCalendar({ cards, transactions }) {
 
   const now = new Date();
   const monthOffset = (year - now.getFullYear()) * 12 + (month - now.getMonth());
+  // Com um dia selecionado, a lista abaixo mostra só os eventos daquele dia — clicar de novo
+  // no mesmo dia (ou no "x" do chip) volta a mostrar o mês inteiro.
+  const displayedEvents = selectedDay ? events.filter((e) => e.day === selectedDay) : events;
 
   return (
     <Card className="animate-fade-up">
@@ -2693,24 +2775,44 @@ function FinancialCalendar({ cards, transactions }) {
       </div>
       <div className="grid grid-cols-7 gap-1 mb-3">
         {weekDays.map((d, i) => <div key={i} className="text-center text-[11px] font-medium py-1" style={{ color: 'var(--text-soft)' }}>{d}</div>)}
-        {cells.map((c) => (
-          <div key={c.key} className="aspect-square flex items-center justify-center relative">
-            {c.day && (
-              <span className="text-xs w-7 h-7 flex items-center justify-center rounded-full" style={{ color: 'var(--text)' }}>
-                {c.day}
-                {dayDominantType[c.day] && <span className="absolute bottom-0.5 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors[dayDominantType[c.day]] }} />}
-              </span>
-            )}
-          </div>
-        ))}
+        {cells.map((c) => {
+          const isSelected = c.day != null && selectedDay === c.day;
+          const isDimmed = c.day != null && selectedDay != null && !isSelected;
+          return (
+            <button
+              key={c.key} type="button" disabled={!c.day}
+              onClick={() => setSelectedDay((cur) => (cur === c.day ? null : c.day))}
+              className="aspect-square flex items-center justify-center relative bg-transparent border-0 p-0"
+              style={{ cursor: c.day ? 'pointer' : 'default' }}
+            >
+              {c.day && (
+                <span
+                  className="text-xs w-7 h-7 flex items-center justify-center rounded-full transition-colors"
+                  style={{ color: isSelected ? '#fff' : 'var(--text)', backgroundColor: isSelected ? 'var(--primary)' : 'transparent', opacity: isDimmed ? 0.35 : 1 }}
+                >
+                  {c.day}
+                  {dayDominantType[c.day] && !isSelected && <span className="absolute bottom-0.5 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors[dayDominantType[c.day]] }} />}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.gasto }} /> Gasto</span>
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.recebimento }} /> Recebimento</span>
-        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.vencimento }} /> Vencimento de fatura</span>
+        {selectedDay ? (
+          <button onClick={() => setSelectedDay(null)} className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+            Dia {selectedDay} <X size={11} />
+          </button>
+        ) : (
+          <>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.gasto }} /> Gasto</span>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.recebimento }} /> Recebimento</span>
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.vencimento }} /> Vencimento de fatura</span>
+          </>
+        )}
       </div>
       <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-        {events.map((e, i) => (
+        {displayedEvents.map((e, i) => (
           <div key={i} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: 'var(--bg)' }}>
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-display font-semibold w-6 text-center shrink-0" style={{ color: 'var(--primary)' }}>{e.day}</span>
@@ -2719,7 +2821,11 @@ function FinancialCalendar({ cards, transactions }) {
             <span className="tabular-nums font-medium shrink-0 ml-2" style={{ color: eventColors[e.type] }}>{formatBRL(e.amount)}</span>
           </div>
         ))}
-        {events.length === 0 && <p className="text-xs text-center py-4" style={{ color: 'var(--text-soft)' }}>Nenhum evento próximo neste mês.</p>}
+        {displayedEvents.length === 0 && (
+          <p className="text-xs text-center py-4" style={{ color: 'var(--text-soft)' }}>
+            {selectedDay ? `Nenhum lançamento no dia ${selectedDay}.` : 'Nenhum evento próximo neste mês.'}
+          </p>
+        )}
       </div>
     </Card>
   );
@@ -2740,7 +2846,7 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
           <FieldLabel>Debitar de qual conta?</FieldLabel>
           <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
             <option value="">Nenhuma (só marcar como paga)</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
           </Select>
           <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
             {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
@@ -2758,11 +2864,10 @@ function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
 // Versão compacta do cartão pra aba Fatura mensal — uma linha só, em vez do card grande (esse
 // já existe por inteiro na aba "Meus cartões", incluindo limite, vencimento e antecipar
 // parcelas; repetir tudo aqui só ocupava espaço à toa). Clicar na linha seleciona/filtra por
-// esse cartão só; clicar de novo tira a seleção. "Pagar fatura" continua disponível, só que
-// como um botão pequeno embutido na própria linha.
-function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect, year, month, subview, onPayInvoice, gradient }) {
-  const [showPayModal, setShowPayModal] = useState(false);
-  const { cycleInvoice, displayInvoice, displayCount, isPayable } = useMemo(() => {
+// esse cartão só; clicar de novo tira a seleção. Só informativa — pagar a fatura (inteira ou por
+// lançamento) é feito na aba "Meus cartões" e dentro de cada lançamento, não aqui.
+function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, month, subview, gradient }) {
+  const { displayInvoice, displayCount } = useMemo(() => {
     // Sempre pelo CICLO da fatura do mês sendo navegado — a mesma conta que a lista de
     // lançamentos usa na subview "Fatura". Antes, no mês corrente (offset 0), essa linha
     // calculava a fatura "em aberto agora" (por data de vencimento), um número diferente do
@@ -2770,7 +2875,6 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
     const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
       && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
-    const cycleInvoice = cycleItems.reduce((s, t) => s + t.amount, 0);
     // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
     // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
     // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
@@ -2778,13 +2882,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
     const monthItems = subview === 'todas'
       ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
       : cycleItems;
-    // "Pagar fatura" só faz sentido no mês em que a fatura REALMENTE em aberto (a próxima a
-    // vencer) cai — e isso depende do dia de fechamento de CADA cartão, não do mês atual do
-    // calendário: um cartão que já fechou pode ter a fatura aberta caindo no mês seguinte,
-    // enquanto outro cartão ainda está com a fatura aberta no mês corrente.
-    const dueCycle = getCardInvoiceCycle(card, ymd(getNextCardDueDate(card)));
-    const isPayable = dueCycle.year === year && dueCycle.month === month;
-    return { cycleInvoice, displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length, isPayable };
+    return { displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length };
   }, [card, transactions, year, month, subview]);
 
   return (
@@ -2802,17 +2900,7 @@ function CardInvoiceRow({ card, transactions, accounts, selected, onToggleSelect
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
         <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
-      <div className="text-right shrink-0">
-        <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
-        {subview === 'fatura' && isPayable && (cycleInvoice > 0 ? (
-          <button onClick={(e) => { e.stopPropagation(); setShowPayModal(true); }} className="text-xs font-medium px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>Pagar fatura</button>
-        ) : (
-          <span className="text-xs font-medium px-2.5 py-1 rounded-lg flex items-center justify-end gap-1" style={{ backgroundColor: 'var(--income-soft)', color: 'var(--income)' }}><Check size={10} /> Em dia</span>
-        ))}
-      </div>
-      {showPayModal && (
-        <PayInvoiceModal card={card} amount={cycleInvoice} accounts={accounts} onConfirm={(accountId) => { onPayInvoice(card, cycleInvoice, accountId); setShowPayModal(false); }} onClose={() => setShowPayModal(false)} />
-      )}
+      <p className="text-sm font-semibold tabular-nums shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
     </div>
   );
 }
@@ -3151,20 +3239,14 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const [installmentEnabled, setInstallmentEnabled] = useState(false);
   const [installmentCount, setInstallmentCount] = useState(2);
   const [installmentCountText, setInstallmentCountText] = useState('2');
-  const [installmentTotal, setInstallmentTotal] = useState(0);
-  // 'total': usuário informa o valor total da compra, o valor da parcela é calculado.
-  // 'porParcela': usuário informa o valor de cada parcela, o total é calculado automaticamente
-  // (ex: R$10 em 10x → total R$100) — útil quando você sabe o valor da parcela de cabeça (tipo
-  // uma assinatura) mas não o valor total de bate-pronto.
-  const [installmentInputMode, setInstallmentInputMode] = useState('total');
-  const [installmentPerValue, setInstallmentPerValue] = useState(0);
-
-  useEffect(() => {
-    if (installmentInputMode === 'porParcela') {
-      setInstallmentTotal(Math.round(installmentPerValue * installmentCount * 100) / 100);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [installmentInputMode, installmentPerValue, installmentCount]);
+  const [installmentRawTotal, setInstallmentRawTotal] = useState(0);
+  const [installmentRawPerValue, setInstallmentRawPerValue] = useState(0);
+  // Qual dos dois campos (valor total / valor da parcela) foi digitado por último — é a partir
+  // dele que o outro é recalculado sempre que o número de parcelas muda. Antes, os dois campos
+  // eram alternados por um botão de "modo" e tinham estados independentes — trocar de um pro
+  // outro descartava o valor já preenchido no primeiro. Agora os dois ficam sempre visíveis e
+  // sincronizados, então digitar num não apaga o outro.
+  const [installmentSource, setInstallmentSource] = useState('total');
 
   const cltBreakdown = useMemo(
     () => (form.isSalary ? calcCLTNetSalary(form.grossSalary, form.dependents) : null),
@@ -3241,7 +3323,11 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
 
   const selectedCard = cards.find((c) => c.id === form.cardId);
   const selectedBenefit = benefits.find((b) => b.id === form.benefitId);
-  const perInstallment = installmentCount > 0 ? installmentTotal / installmentCount : 0;
+  // Um dos dois é sempre o "digitado" (installmentSource) e o outro é derivado dele — nunca os
+  // dois guardados em separado, pra nunca ficarem fora de sincronia entre si nem com o número de
+  // parcelas.
+  const installmentTotal = installmentSource === 'total' ? installmentRawTotal : Math.round(installmentRawPerValue * installmentCount * 100) / 100;
+  const perInstallment = installmentSource === 'perValue' ? installmentRawPerValue : (installmentCount > 0 ? Math.round((installmentRawTotal / installmentCount) * 100) / 100 : 0);
   const isEditingInstallment = !!initial?.installmentGroupId;
   const canToggleInstallments = !isEditingInstallment;
   const currentInvoiceCycle = useMemo(
@@ -3398,11 +3484,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div ref={amountRef} className={flashField === 'amount' ? 'rounded-xl animate-field-flash' : ''}>
               <FieldLabel error={errors.amount}>Valor total da compra</FieldLabel>
-              {installmentInputMode === 'porParcela' ? (
-                <div className={inputClass} style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--text-soft)' }}>{formatBRL(installmentTotal)} <span className="ml-1 text-xs">(calculado)</span></div>
-              ) : (
-                <CurrencyInput value={installmentTotal} onChange={setInstallmentTotal} />
-              )}
+              <CurrencyInput value={installmentTotal} onChange={(v) => { setInstallmentRawTotal(v); setInstallmentSource('total'); }} />
               {errors.amount && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.amount}</p>}
             </div>
             <div ref={dateRef} className={flashField === 'date' ? 'rounded-xl animate-field-flash' : ''}>
@@ -3477,43 +3559,36 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
         {form.type === 'despesa' && selectedCard && canToggleInstallments && (
           <div className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
             <label className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1" style={{ color: 'var(--text)' }}>
-              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) { setInstallmentTotal(form.amount || 0); setInstallmentInputMode('total'); setInstallmentPerValue(0); } }} className="w-5 h-5 shrink-0 focus-ring" />
+              <input type="checkbox" checked={installmentEnabled} onChange={(e) => { setInstallmentEnabled(e.target.checked); if (e.target.checked) { setInstallmentRawTotal(form.amount || 0); setInstallmentSource('total'); } }} className="w-5 h-5 shrink-0 focus-ring" />
               {initial ? 'Converter em compra parcelada' : 'Compra parcelada'}
             </label>
             {installmentEnabled && (
               <>
-                <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ backgroundColor: 'var(--card)' }}>
-                  <button type="button" onClick={() => setInstallmentInputMode('total')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'total' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor total</button>
-                  <button type="button" onClick={() => setInstallmentInputMode('porParcela')} className="text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors" style={installmentInputMode === 'porParcela' ? { backgroundColor: 'var(--primary)', color: '#fff' } : { color: 'var(--text-soft)' }}>Sei o valor da parcela</button>
-                </div>
-                {installmentInputMode === 'porParcela' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <FieldLabel>Valor de cada parcela</FieldLabel>
-                    <CurrencyInput value={installmentPerValue} onChange={setInstallmentPerValue} />
+                    <FieldLabel>Valor da parcela</FieldLabel>
+                    <CurrencyInput value={perInstallment} onChange={(v) => { setInstallmentRawPerValue(v); setInstallmentSource('perValue'); }} />
                   </div>
-                )}
-                <div>
-                  <FieldLabel>Número de parcelas</FieldLabel>
-                  <input
-                    type="number" inputMode="numeric" min={2} max={48}
-                    value={installmentCountText}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setInstallmentCountText(raw);
-                      const n = Number(raw);
-                      if (raw !== '' && !Number.isNaN(n)) setInstallmentCount(n);
-                    }}
-                    onBlur={() => {
-                      const clamped = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
-                      setInstallmentCount(clamped);
-                      setInstallmentCountText(String(clamped));
-                    }}
-                    className={inputClass} style={inputStyle}
-                  />
-                </div>
-                <div className="rounded-lg px-3 py-2 text-sm font-medium tabular-nums" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-                  {installmentCount}x de {formatBRL(perInstallment)}{installmentInputMode === 'porParcela' && ` — total ${formatBRL(installmentTotal)}`}
+                  <div>
+                    <FieldLabel>Número de parcelas</FieldLabel>
+                    <input
+                      type="number" inputMode="numeric" min={2} max={48}
+                      value={installmentCountText}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setInstallmentCountText(raw);
+                        const n = Number(raw);
+                        if (raw !== '' && !Number.isNaN(n)) setInstallmentCount(n);
+                      }}
+                      onBlur={() => {
+                        const clamped = Math.max(2, Math.min(48, Number(installmentCountText) || 2));
+                        setInstallmentCount(clamped);
+                        setInstallmentCountText(String(clamped));
+                      }}
+                      className={inputClass} style={inputStyle}
+                    />
+                  </div>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
                   {initial
@@ -3533,10 +3608,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <Select value={form.status} disabled={(installmentEnabled && canToggleInstallments) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && canToggleInstallments) || !!form.cardId ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={installmentEnabled && canToggleInstallments} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: installmentEnabled && canToggleInstallments ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
             </Select>
-            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Fica Pendente até você pagar a fatura desse cartão, na aba Cartões.</p>}
+            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Marcar como Pago aqui só sinaliza esse lançamento — não desconta de conta nenhuma. Pra pagar (ou adiantar) a fatura de verdade, use a aba Cartões.</p>}
           </div>
         </div>
         {duplicateWarning && (
@@ -3746,7 +3821,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
   const filtered = useMemo(() => transactions.filter((t) => {
     if (!showCardTx && t.cardId) return false;
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
-    const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = stripDiacritics(t.description).toLowerCase().includes(stripDiacritics(search).toLowerCase());
     const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
     const matchesAccount = accountFilter === 'all' || t.account === accountFilter;
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
@@ -4138,6 +4213,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
       {selectionMode && selectedIds.length > 0 && (
         <SelectionActionBar
           count={selectedIds.length}
+          total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
           onClear={exitSelectionMode}
           onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
@@ -4614,7 +4690,7 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 // Barra de ações flutuante da seleção múltipla — some acima do FAB (que fica no canto), pra não
 // se sobrepor a ele. As ações em si (o que cada botão faz) ficam a cargo de quem usa este
 // componente, aqui é só a casca visual + confirmação de excluir (a única ação destrutiva).
-function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
+function SelectionActionBar({ count, total, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <>
@@ -4622,7 +4698,8 @@ function SelectionActionBar({ count, onClear, onDelete, onMoveNext, onChangeDate
         <button onClick={onClear} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
           <X size={16} /><span className="text-[10px] font-medium leading-none">Fechar</span>
         </button>
-        <span className="text-sm font-semibold px-2 shrink-0">{count}</span>
+        <span className="text-sm font-semibold pl-2 pr-1 shrink-0">{count}</span>
+        {total != null && <span className="text-xs tabular-nums pr-2 shrink-0 opacity-90">· {formatBRL(total)}</span>}
         <div className="flex-1 flex items-center justify-end gap-0.5 overflow-x-auto">
           {onChangePayment && (
             <button onClick={onChangePayment} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
@@ -4750,7 +4827,7 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
   );
 }
 
-function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onPayInvoice, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
+function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
@@ -4850,8 +4927,8 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       const cycle = getCardInvoiceCycle(card, t.date);
       if (cycle.year !== year || cycle.month !== month) return false;
       if (search.trim()) {
-        const q = search.trim().toLowerCase();
-        if (!t.description.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q)) return false;
+        const q = stripDiacritics(search.trim()).toLowerCase();
+        if (!stripDiacritics(t.description).toLowerCase().includes(q) && !stripDiacritics(t.category).toLowerCase().includes(q)) return false;
       }
       return true;
     })
@@ -4864,7 +4941,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       && (cardFilter === 'all' || t.cardId === cardFilter)
       && (paymentMethodFilter === 'all' || t.paymentMethod === paymentMethodFilter)
       && (categoryFilter === 'all' || t.category === categoryFilter)
-      && (!search.trim() || t.description.toLowerCase().includes(search.trim().toLowerCase()) || t.category.toLowerCase().includes(search.trim().toLowerCase())))
+      && (!search.trim() || stripDiacritics(t.description).toLowerCase().includes(stripDiacritics(search.trim()).toLowerCase()) || stripDiacritics(t.category).toLowerCase().includes(stripDiacritics(search.trim()).toLowerCase())))
     .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
@@ -4889,10 +4966,9 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         <div className="space-y-2 sm:max-w-xl">
           {visibleCards.map((c) => (
             <CardInvoiceRow
-              key={c.id} card={c} transactions={transactions} accounts={accounts}
+              key={c.id} card={c} transactions={transactions}
               selected={cardFilter === c.id} onToggleSelect={() => toggleCard(c.id)}
               year={year} month={month} subview={subview}
-              onPayInvoice={onPayInvoice}
               gradient={cardGradients[cards.indexOf(c) % cardGradients.length]}
             />
           ))}
@@ -5136,6 +5212,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       {selectionMode && selectedIds.length > 0 && (
         <SelectionActionBar
           count={selectedIds.length}
+          total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
           onClear={exitSelectionMode}
           onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
           onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
@@ -5193,7 +5270,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
       </div>
 
       {view === 'fatura' ? (
-        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onPayInvoice={onPayInvoice} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} />
+        <MonthlyInvoicePage cards={cards} transactions={transactions} accounts={accounts} benefits={benefits} cardGradients={cardGradients} onAdvanceInstallments={onAdvanceInstallments} onMarkPaid={onMarkPaid} onEditTransaction={onEditTransaction} onDeleteTransaction={onDeleteTransaction} onImport={onImport} onBulkDelete={onBulkDelete} onBulkMoveNext={onBulkMoveNext} onBulkChangeDate={onBulkChangeDate} onBulkChangePayment={onBulkChangePayment} />
       ) : (
         <>
           <div className="flex justify-center">
@@ -5865,32 +5942,136 @@ function VisibilitySettingsSection({ settings, onChangeSettings }) {
   );
 }
 
-// Gerenciamento de categorias em Configurações: remover categorias do conjunto base (viram
-// "Outros" em qualquer lançamento antigo que já as usava, mas sem apagar nada) e adicionar até 3
-// personalizadas, com cor da paleta do app e um ícone em forma geométrica (mais simples que
-// escolher entre uma lista enorme de ícones).
-function CategoriesSettingsSection({ settings, onChangeSettings }) {
+// Formulário de categoria personalizada — usado tanto pra criar quanto (via swipe pra editar,
+// na lista abaixo) pra alterar nome, cor e ícone de uma categoria já criada. O ícone vem da
+// mesma ICON_LIBRARY usada nas metas (mais as 3 formas geométricas, pra quando nenhum ícone
+// específico combinar), e a cor vem da paleta expandida de 22 tons.
+function CategoryForm({ initial, existingNames, onSave, onClose }) {
+  const isEditing = !!initial;
+  const [name, setName] = useState(initial?.name || '');
+  const [color, setColor] = useState(initial?.color || CATEGORY_COLOR_PALETTE[0].hex);
+  const [icon, setIcon] = useState(initial?.icon || 'Home');
+  const [error, setError] = useState('');
+  const PreviewIcon = ICON_LIBRARY[icon] || SHAPE_ICONS[icon] || ShapeSquareIcon;
+
+  function handleSave() {
+    const trimmed = name.trim();
+    if (!trimmed) { setError('Informe um nome'); return; }
+    const nameChanged = !isEditing || trimmed.toLowerCase() !== initial.name.toLowerCase();
+    if (nameChanged && existingNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())) {
+      setError('Já existe uma categoria com esse nome');
+      return;
+    }
+    onSave({ name: trimmed, color, icon });
+  }
+
+  return (
+    <Modal title={isEditing ? 'Editar categoria' : 'Nova categoria'} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <FieldLabel error={error}>Nome da categoria</FieldLabel>
+          <input value={name} onChange={(e) => { setName(e.target.value); setError(''); }} className={inputClass} style={inputStyle} placeholder="Ex: Pets" maxLength={20} />
+          {error && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{error}</p>}
+        </div>
+        <div>
+          <FieldLabel>Cor</FieldLabel>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORY_COLOR_PALETTE.map((c) => (
+              <button key={c.hex} type="button" onClick={() => setColor(c.hex)} title={c.label} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: c.hex, border: color === c.hex ? '2px solid var(--text)' : '2px solid transparent' }} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Ícone</FieldLabel>
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+            {Object.entries(ICON_LIBRARY).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setIcon(key)} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: icon === key ? 'var(--primary-soft)' : 'transparent', border: icon === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                <Icon size={16} color={icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+              </button>
+            ))}
+            {Object.entries(SHAPE_ICONS).map(([key, Icon]) => (
+              <button key={key} type="button" onClick={() => setIcon(key)} className="p-2.5 rounded-xl shrink-0" style={{ backgroundColor: icon === key ? 'var(--primary-soft)' : 'transparent', border: icon === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
+                <Icon size={16} color={icon === key ? 'var(--primary)' : 'var(--text-soft)'} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl p-3 flex items-center gap-3" style={{ backgroundColor: 'var(--bg)' }}>
+          <IconCircle icon={PreviewIcon} color={color} soft={softTint(color)} size={36} />
+          <span className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{name.trim() || 'Pré-visualização'}</span>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={handleSave}>{isEditing ? 'Salvar alterações' : 'Adicionar'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Encontra a chave da ICON_LIBRARY que corresponde a um componente de ícone já resolvido (usado
+// pra pré-selecionar o ícone certo ao editar uma categoria base que nunca foi personalizada —
+// nesse caso não existe uma "chave" salva ainda, só o componente original de BASE_CATEGORIES).
+const ICON_LIBRARY_KEYS = new Map(Object.entries(ICON_LIBRARY).map(([key, Icon]) => [Icon, key]));
+function iconToKey(IconComponent) {
+  return ICON_LIBRARY_KEYS.get(IconComponent) || 'Home';
+}
+
+// Gerenciamento de categorias em Configurações: todas as categorias — base ou personalizada —
+// aparecem numa lista só, em ordem alfabética, com swipe pra editar (nome, cor e ícone) ou
+// remover. "Remover" numa categoria base apenas oculta (reversível, num painel "Ocultas" logo
+// abaixo — "Outros" nunca aparece aqui, é o fallback universal e não pode ser ocultado ou
+// editado); numa personalizada, exclui de vez. Cor vem da paleta expandida de 22 tons, ícone da
+// biblioteca compartilhada com as metas.
+function CategoriesSettingsSection({ settings, onChangeSettings, onEditCategory }) {
   const hidden = settings.hiddenCategories || [];
+  const overrides = settings.categoryOverrides || {};
   const custom = settings.customCategories || [];
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState(CATEGORY_COLOR_PALETTE[0]);
-  const [newShape, setNewShape] = useState('square');
+  const [editingRow, setEditingRow] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(null);
-  const builtIn = Object.keys(BASE_CATEGORIES).filter((n) => n !== 'Outros');
 
-  function addCategory() {
-    const name = newName.trim();
-    if (!name || custom.length >= 3) return;
-    onChangeSettings({ ...settings, customCategories: [...custom, { name, color: newColor, shape: newShape }] });
-    setNewName(''); setNewColor(CATEGORY_COLOR_PALETTE[0]); setNewShape('square'); setShowAddForm(false);
+  const baseRows = Object.entries(BASE_CATEGORIES)
+    .filter(([key]) => key !== 'Outros' && !hidden.includes(key))
+    .map(([key, meta]) => {
+      const ov = overrides[key];
+      return {
+        baseKey: key,
+        name: ov?.name?.trim() || key,
+        color: ov?.color || meta.color,
+        icon: ov?.icon || iconToKey(meta.icon),
+        iconComponent: ov?.icon ? (ICON_LIBRARY[ov.icon] || SHAPE_ICONS[ov.icon] || meta.icon) : meta.icon,
+      };
+    });
+  const customRows = custom.map((c) => ({
+    baseKey: null,
+    name: c.name,
+    color: c.color,
+    icon: c.icon || c.shape,
+    iconComponent: ICON_LIBRARY[c.icon] || SHAPE_ICONS[c.icon] || SHAPE_ICONS[c.shape] || ShapeSquareIcon,
+  }));
+  const rows = [...baseRows, ...customRows].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const allNames = rows.map((r) => r.name);
+
+  function addCategory(data) {
+    if (custom.length >= 3) return;
+    onChangeSettings({ ...settings, customCategories: [...custom, data] });
+    setShowAddForm(false);
+  }
+  function saveEditedRow(data) {
+    if (editingRow.baseKey) {
+      onEditCategory(editingRow.baseKey, editingRow.name, data, true);
+    } else {
+      onEditCategory(editingRow.name, editingRow.name, data, false);
+    }
+    setEditingRow(null);
   }
   function confirmAndRemove() {
-    const name = confirmRemove;
-    if (custom.some((c) => c.name === name)) {
-      onChangeSettings({ ...settings, customCategories: custom.filter((c) => c.name !== name) });
+    const row = confirmRemove;
+    if (row.baseKey) {
+      onChangeSettings({ ...settings, hiddenCategories: [...hidden, row.baseKey] });
     } else {
-      onChangeSettings({ ...settings, hiddenCategories: [...hidden, name] });
+      onChangeSettings({ ...settings, customCategories: custom.filter((c) => c.name !== row.name) });
     }
     setConfirmRemove(null);
   }
@@ -5898,83 +6079,70 @@ function CategoriesSettingsSection({ settings, onChangeSettings }) {
   return (
     <Card>
       <SectionTitle subtitle="Escolha quais categorias aparecem na hora de lançar, e crie até 3 novas.">Categorias</SectionTitle>
-      <div className="space-y-1">
-        {builtIn.map((name) => {
-          const isHidden = hidden.includes(name);
-          const meta = BASE_CATEGORIES[name];
-          return (
-            <div key={name} className="flex items-center justify-between gap-3 py-1.5">
+      <div className="space-y-1.5">
+        {rows.map((row) => (
+          <SwipeableRow
+            key={row.baseKey || row.name} onEdit={() => setEditingRow(row)} onDelete={() => setConfirmRemove(row)}
+            deleteConfirm={{
+              title: row.baseKey ? 'Ocultar categoria' : 'Excluir categoria',
+              description: row.baseKey
+                ? `"${row.name}" deixa de aparecer na hora de lançar. Lançamentos que já usam essa categoria não são afetados, e dá pra restaurar quando quiser. Quer mesmo ocultar?`
+                : `Lançamentos que já usam "${row.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`,
+            }}
+          >
+            <div className="flex items-center justify-between gap-3 py-1.5 px-1">
               <div className="flex items-center gap-2.5 min-w-0">
-                <IconCircle icon={meta.icon} color={meta.color} soft={meta.soft} size={30} />
-                <span className="text-sm truncate" style={{ color: isHidden ? 'var(--text-soft)' : 'var(--text)', textDecoration: isHidden ? 'line-through' : 'none' }}>{name}</span>
+                <IconCircle icon={row.iconComponent} color={row.color} soft={softTint(row.color)} size={30} />
+                <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{row.name}</span>
               </div>
-              {isHidden ? (
-                <button onClick={() => onChangeSettings({ ...settings, hiddenCategories: hidden.filter((n) => n !== name) })} className="text-xs font-medium shrink-0" style={{ color: 'var(--primary)' }}>Restaurar</button>
-              ) : (
-                <button onClick={() => setConfirmRemove(name)} className="text-xs font-medium shrink-0" style={{ color: 'var(--text-soft)' }}>Remover</button>
-              )}
+              <Pencil size={14} color="var(--text-soft)" className="shrink-0" />
             </div>
-          );
-        })}
-        {custom.map((c) => {
-          const ShapeIcon = SHAPE_ICONS[c.shape] || SHAPE_ICONS.square;
-          return (
-            <div key={c.name} className="flex items-center justify-between gap-3 py-1.5">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <IconCircle icon={ShapeIcon} color={c.color} soft={`${c.color}29`} size={30} />
-                <span className="text-sm truncate" style={{ color: 'var(--text)' }}>{c.name}</span>
-                <Badge color="var(--primary)" soft="var(--primary-soft)">Nova</Badge>
-              </div>
-              <button onClick={() => setConfirmRemove(c.name)} className="text-xs font-medium shrink-0" style={{ color: 'var(--text-soft)' }}>Remover</button>
-            </div>
-          );
-        })}
+          </SwipeableRow>
+        ))}
+        <p className="text-[11px] px-1 pt-0.5" style={{ color: 'var(--text-soft)' }}>Arraste uma categoria pra esquerda pra editar ou {custom.length > 0 ? 'ocultar/excluir' : 'ocultar'}</p>
       </div>
 
+      {hidden.length > 0 && (
+        <div className="mt-4 pt-4 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
+          <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-soft)' }}>Ocultas</p>
+          {hidden.map((key) => {
+            const ov = overrides[key];
+            const displayName = ov?.name?.trim() || key;
+            return (
+              <div key={key} className="flex items-center justify-between gap-3 py-1">
+                <span className="text-sm truncate" style={{ color: 'var(--text-soft)', textDecoration: 'line-through' }}>{displayName}</span>
+                <button onClick={() => onChangeSettings({ ...settings, hiddenCategories: hidden.filter((n) => n !== key) })} className="text-xs font-medium shrink-0" style={{ color: 'var(--primary)' }}>Restaurar</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
-        {showAddForm ? (
-          <div className="space-y-3">
-            <div>
-              <FieldLabel>Nome da categoria</FieldLabel>
-              <input value={newName} onChange={(e) => setNewName(e.target.value)} className={inputClass} style={inputStyle} placeholder="Ex: Pets" maxLength={20} />
-            </div>
-            <div>
-              <FieldLabel>Cor</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORY_COLOR_PALETTE.map((color) => (
-                  <button key={color} onClick={() => setNewColor(color)} className="w-8 h-8 rounded-full shrink-0" style={{ backgroundColor: color, border: newColor === color ? '2px solid var(--text)' : '2px solid transparent' }} />
-                ))}
-              </div>
-            </div>
-            <div>
-              <FieldLabel>Ícone</FieldLabel>
-              <div className="flex gap-2">
-                {['square', 'circle', 'triangle'].map((key) => {
-                  const Icon = SHAPE_ICONS[key];
-                  return (
-                    <button key={key} onClick={() => setNewShape(key)} className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ backgroundColor: newShape === key ? 'var(--primary-soft)' : 'var(--bg)', border: newShape === key ? '1px solid var(--primary)' : '1px solid var(--border)' }}>
-                      <Icon size={18} color={newShape === key ? 'var(--primary-dark)' : 'var(--text-soft)'} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-1">
-              <Button variant="secondary" size="sm" onClick={() => setShowAddForm(false)}>Cancelar</Button>
-              <Button size="sm" onClick={addCategory} disabled={!newName.trim()}>Adicionar</Button>
-            </div>
-          </div>
-        ) : custom.length >= 3 ? (
+        {custom.length >= 3 ? (
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Limite de 3 categorias novas atingido. Remova uma pra adicionar outra.</p>
         ) : (
           <Button variant="secondary" size="sm" icon={Plus} onClick={() => setShowAddForm(true)}>Nova categoria</Button>
         )}
       </div>
 
+      {showAddForm && (
+        <CategoryForm existingNames={allNames} onSave={addCategory} onClose={() => setShowAddForm(false)} />
+      )}
+      {editingRow && (
+        <CategoryForm
+          initial={editingRow}
+          existingNames={allNames.filter((n) => n !== editingRow.name)}
+          onSave={saveEditedRow}
+          onClose={() => setEditingRow(null)}
+        />
+      )}
       {confirmRemove && (
         <ConfirmModal
-          title="Remover categoria"
-          description={`Lançamentos que já usam "${confirmRemove}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo remover?`}
+          title={confirmRemove.baseKey ? 'Ocultar categoria' : 'Excluir categoria'}
+          description={confirmRemove.baseKey
+            ? `"${confirmRemove.name}" deixa de aparecer na hora de lançar. Lançamentos que já usam essa categoria não são afetados, e dá pra restaurar quando quiser. Quer mesmo ocultar?`
+            : `Lançamentos que já usam "${confirmRemove.name}" vão continuar existindo, só que vão aparecer como "Outros" a partir de agora. Quer mesmo excluir?`}
           onConfirm={confirmAndRemove}
           onClose={() => setConfirmRemove(null)}
         />
@@ -5983,7 +6151,7 @@ function CategoriesSettingsSection({ settings, onChangeSettings }) {
   );
 }
 
-function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox, onExportBackup, onImportBackup }) {
+function SettingsPage({ settings, onChangeSettings, onEditCategory, onReset, onClearData, dropboxConnected, dropboxBusy, dropboxLastBackup, dropboxSyncError, onConnectDropbox, onDisconnectDropbox, onBackupNow, onRestoreFromDropbox, onExportBackup, onImportBackup }) {
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
@@ -6040,7 +6208,7 @@ function SettingsPage({ settings, onChangeSettings, onReset, onClearData, dropbo
         </div>
       </Card>
 
-      <CategoriesSettingsSection settings={settings} onChangeSettings={onChangeSettings} />
+      <CategoriesSettingsSection settings={settings} onChangeSettings={onChangeSettings} onEditCategory={onEditCategory} />
 
       <VisibilitySettingsSection settings={settings} onChangeSettings={onChangeSettings} />
 
@@ -6204,7 +6372,10 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [editingSearchResult, setEditingSearchResult] = useState(null);
   const [toasts, setToasts] = useState([]);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
+  // Guarda o TEXTO de cada aviso já dispensado nesta sessão (não persiste — reaparece se
+  // recarregar a página), não só "já dispensei algo": assim, dispensar o aviso de saldo baixo
+  // não esconde um aviso diferente e mais urgente que surja depois (ex: fatura vencendo hoje).
+  const [dismissedBannerTexts, setDismissedBannerTexts] = useState(() => new Set());
   const [celebration, setCelebration] = useState(null); // { id, origin: {x,y} | null } — explosão de emojis ao concluir uma meta
   function celebrateGoalCompletion(origin) {
     setCelebration({ id: Date.now(), origin });
@@ -6896,6 +7067,37 @@ export default function App() {
   function changeSettings(newSettings) {
     setSettings(newSettings); persist({ settings: newSettings });
   }
+  // Editar uma categoria (base ou personalizada) em Configurações. Cor/ícone são só metadados,
+  // então basta trocar nas configurações — mas o NOME também é a chave usada em
+  // transaction.category e recurring.category, então, se ele mudar, os lançamentos que já
+  // usavam o nome antigo são atualizados junto, pra não "sumirem" pra Outros silenciosamente.
+  // Numa categoria base, `identifier` é a chave original fixa (ex: "Mercado", que nunca muda —
+  // é o que o reconhecimento automático de lançamentos usa por baixo dos panos) e a edição vira
+  // um "override" guardado à parte, preservando o conjunto base intacto. Numa personalizada,
+  // `identifier` é o próprio nome atual dela.
+  function editCategory(identifier, oldDisplayName, updated, isBase) {
+    let newSettings;
+    if (isBase) {
+      const overrides = settings.categoryOverrides || {};
+      newSettings = { ...settings, categoryOverrides: { ...overrides, [identifier]: updated } };
+    } else {
+      const custom = settings.customCategories || [];
+      newSettings = { ...settings, customCategories: custom.map((c) => (c.name === identifier ? updated : c)) };
+    }
+    setSettings(newSettings);
+    if (updated.name === oldDisplayName) {
+      persist({ settings: newSettings });
+      addToast('Categoria atualizada.');
+      return;
+    }
+    const affected = transactions.filter((t) => t.category === oldDisplayName).length + recurring.filter((r) => r.category === oldDisplayName).length;
+    const newTransactions = transactions.map((t) => (t.category === oldDisplayName ? { ...t, category: updated.name } : t));
+    const newRecurring = recurring.map((r) => (r.category === oldDisplayName ? { ...r, category: updated.name } : r));
+    setTransactions(newTransactions);
+    setRecurring(newRecurring);
+    persist({ settings: newSettings, transactions: newTransactions, recurring: newRecurring });
+    addToast(affected > 0 ? `Categoria renomeada — ${affected} lançamento(s) atualizado(s).` : 'Categoria renomeada.');
+  }
   function resetToSampleData() {
     const t = buildInitialTransactions();
     setTransactions(t); setAccounts(initialAccounts); setCards(initialCards);
@@ -6952,10 +7154,10 @@ export default function App() {
 
   const filteredForSearch = useMemo(() => {
     if (!search.trim()) return null;
-    const q = search.toLowerCase().trim();
-    const qAmount = q.replace('.', ',');
+    const q = stripDiacritics(search.trim()).toLowerCase();
+    const qAmount = search.toLowerCase().trim().replace('.', ',');
     return transactions.filter((t) => {
-      if (t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)) return true;
+      if (stripDiacritics(t.description).toLowerCase().includes(q) || stripDiacritics(t.category).toLowerCase().includes(q)) return true;
       const amountStr = t.amount.toFixed(2).replace('.', ',');
       return amountStr.includes(qAmount);
     });
@@ -7010,8 +7212,13 @@ export default function App() {
       <Sidebar activePage={activePage} setActivePage={goTo} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} onNewTransaction={() => setModal({ type: 'newTransaction' })} dropboxConnected={dropboxConnected} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError} onGoToSettings={() => goTo('configuracoes')} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} insights={insights} />
-        {!bannerDismissed && insights[0] && <Banner insight={insights[0]} onDismiss={() => setBannerDismissed(true)} />}
+        <Header period={period} setPeriod={setPeriod} customRange={customRange} setCustomRange={setCustomRange} search={search} setSearch={setSearch} setSidebarOpen={setSidebarOpen} />
+        {(() => {
+          const bannerInsight = insights.find((ins) => !dismissedBannerTexts.has(ins.text));
+          return bannerInsight && (
+            <Banner insight={bannerInsight} onDismiss={() => setDismissedBannerTexts((prev) => new Set(prev).add(bannerInsight.text))} />
+          );
+        })()}
 
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 pt-6 pb-24 lg:pb-6 print-area" onScroll={handleContentScroll}>
           {search.trim() ? (
@@ -7045,7 +7252,7 @@ export default function App() {
               {activePage === 'relatorios' && <ReportsPage monthlyHistory={data.monthlyHistory} transactions={data.transactions} settings={settings} />}
               {activePage === 'configuracoes' && (
                 <SettingsPage
-                  settings={settings} onChangeSettings={changeSettings} onReset={resetToSampleData} onClearData={clearAllData}
+                  settings={settings} onChangeSettings={changeSettings} onEditCategory={editCategory} onReset={resetToSampleData} onClearData={clearAllData}
                   dropboxConnected={dropboxConnected} dropboxBusy={dropboxBusy} dropboxLastBackup={dropboxLastBackup} dropboxSyncError={dropboxSyncError}
                   onConnectDropbox={connectDropbox} onDisconnectDropbox={disconnectDropboxAccount}
                   onBackupNow={backupNowToDropbox} onRestoreFromDropbox={restoreFromDropbox}
