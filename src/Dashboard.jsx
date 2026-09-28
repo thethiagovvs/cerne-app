@@ -478,6 +478,9 @@ function isVisible(settings, page, item) {
 // afetando o saldo na hora, como sempre.
 function transactionBalanceEffect(t) {
   if (!t || t.status !== 'Pago') return 0;
+  // Pagamento de fatura sempre desconta da conta escolhida (é dinheiro saindo de verdade) —
+  // mesmo carregando cardId, que serve só pra ele aparecer dentro da fatura daquele cartão.
+  if (t.isInvoicePayment) return -Math.abs(t.amount);
   if (t.type === 'despesa' && t.cardId) return 0;
   return t.type === 'receita' ? t.amount : -t.amount;
 }
@@ -621,20 +624,16 @@ function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
 
 // Acha o FECHAMENTO (não o vencimento) do ciclo em aberto agora — a fronteira real que separa
 // "já faz parte dessa fatura" de "só vai entrar na próxima", igual o getCardInvoiceCycle usa pra
-// agrupar lançamentos na Fatura mensal. Diferente do vencimento (que pode cair em qualquer dia
-// do mês seguinte ao fechamento), essa data é sempre um "dia de fechamento" de algum mês — por
-// isso é o valor certo pra usar como paidThroughDate: assim o próximo lançamento já sabe, sem
-// ambiguidade, se ficou "dentro" da fatura paga ou "fora" dela (na próxima).
+// agrupar lançamentos na Fatura mensal.
 function getOpenInvoiceClosingDate(card, referenceDate = new Date()) {
   const dueDate = getNextCardDueDate(card, referenceDate);
   const dueMonthOffset = card.dueDay < card.closingDay ? 1 : 0;
   const closingRef = new Date(dueDate.getFullYear(), dueDate.getMonth() - dueMonthOffset, 1);
   return new Date(closingRef.getFullYear(), closingRef.getMonth(), Math.min(card.closingDay, daysInMonth(closingRef.getFullYear(), closingRef.getMonth())));
 }
-// Corrige uma paidThroughDate que ficou desalinhada do ciclo (salva antes desta correção, como a
-// data em que a pessoa clicou em pagar, não o fechamento de verdade), "encaixando" ela no
-// fechamento de ciclo válido mais próximo — sempre pra trás, nunca pra frente, pra nunca marcar
-// como já pago um lançamento que na verdade ainda está em aberto.
+// Ainda usada por dados salvos antes desta versão (quando o app guardava paidThroughDate) — hoje
+// nada mais grava esse campo, mas encaixar um valor salvo antigo no fechamento de ciclo válido
+// mais próximo evita datas soltas caso o campo ainda exista em backups antigos.
 function snapToClosingBoundary(card, dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const sameMonthClosing = new Date(d.getFullYear(), d.getMonth(), Math.min(card.closingDay, daysInMonth(d.getFullYear(), d.getMonth())));
@@ -642,17 +641,15 @@ function snapToClosingBoundary(card, dateStr) {
   return ymd(closing);
 }
 
-// Fatura atual = tudo que ainda está Pendente neste cartão, até o fechamento do ciclo em aberto.
-// Importante: não filtra mais por paidThroughDate (só data). Se filtrasse por data, pagar a
-// fatura ADIANTADO quebraria o app — a referência do pagamento iria pro fechamento (no futuro),
-// e um lançamento novo, feito hoje, cairia ANTES dessa referência e pareceria "já coberto" por
-// aquele pagamento, sumindo da fatura atual. Usando o status (que só vira 'Pago' quando a fatura
-// é realmente paga), um lançamento novo sempre entra na conta, não importa quando foi criado.
+// Valor em aberto do ciclo de fatura corrente do cartão: soma das compras do ciclo menos os
+// pagamentos já feitos dentro dele (lançamentos com isInvoicePayment) — não depende de marcar
+// item por item como pago, então um pagamento parcial já reflete corretamente aqui.
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
-  const cutoff = ymd(getOpenInvoiceClosingDate(card, referenceDate));
-  return transactions
-    .filter((t) => t.cardId === card.id && t.type === 'despesa' && t.status === 'Pendente' && t.date <= cutoff)
-    .reduce((s, t) => s + t.amount, 0);
+  const currentCycle = getCardInvoiceCycle(card, ymd(referenceDate));
+  const net = transactions
+    .filter((t) => t.cardId === card.id && t.type === 'despesa' && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === currentCycle.year && c.month === currentCycle.month; })())
+    .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0);
+  return Math.max(0, net);
 }
 
 /* ---------- Dias úteis / feriados nacionais (para vencimento adaptativo) ---------- */
@@ -2168,12 +2165,25 @@ function computeKPIs(period, customRange, mh, transactions, accounts, cards, goa
   // "Saldo previsto" soma ao saldo atual só o que AINDA NÃO afetou o saldo das contas. Receitas e
   // despesas comuns já contam aqui só quando "Pago" (isRealized), e nesse caso já foram aplicadas
   // à conta na hora — somar de novo em cima do saldo atual contaria esse valor duas vezes. A única
-  // parte que realmente ainda não saiu de conta nenhuma são as despesas de cartão cuja fatura
-  // ainda está em aberto (o débito só acontece quando a fatura é paga).
-  const unpaidCardExpenses = transactions
-    .filter((t) => t.type === 'despesa' && t.cardId && t.date >= periodStart && t.date <= periodEnd)
-    .filter((t) => { const card = cards.find((c) => c.id === t.cardId); return card && (!card.paidThroughDate || t.date > card.paidThroughDate); })
-    .reduce((s, t) => s + t.amount, 0);
+  // parte que realmente ainda não saiu de conta nenhuma são as despesas de cartão cujo ciclo ainda
+  // tem saldo em aberto (cobranças menos pagamentos já feitos naquele ciclo, nunca negativo).
+  const cardIdsInPeriod = [...new Set(transactions.filter((t) => t.type === 'despesa' && t.cardId && !t.isInvoicePayment && t.date >= periodStart && t.date <= periodEnd).map((t) => t.cardId))];
+  const unpaidCardExpenses = cardIdsInPeriod.reduce((sum, cardId) => {
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) return sum;
+    const cyclesInPeriod = new Set(transactions
+      .filter((t) => t.cardId === cardId && t.type === 'despesa' && !t.isInvoicePayment && t.date >= periodStart && t.date <= periodEnd)
+      .map((t) => { const c = getCardInvoiceCycle(card, t.date); return `${c.year}-${c.month}`; }));
+    let cardTotal = 0;
+    cyclesInPeriod.forEach((key) => {
+      const [y, m] = key.split('-').map(Number);
+      const net = transactions
+        .filter((t) => t.cardId === cardId && t.type === 'despesa' && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === y && c.month === m; })())
+        .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0);
+      cardTotal += Math.max(0, net);
+    });
+    return sum + cardTotal;
+  }, 0);
   const saldoPrevisto = saldoDisponivel - unpaidCardExpenses;
   const patrimonio = mh.length ? mh[mh.length - 1].patrimonio : saldoDisponivel;
   const economiaAcumulada = caixinhas.reduce((s, c) => s + c.balance, 0) + goals.reduce((s, g) => s + g.current, 0);
@@ -2835,26 +2845,32 @@ function FinancialCalendar({ cards, transactions }) {
 
 function PayInvoiceModal({ card, amount, accounts, onConfirm, onClose }) {
   const [accountId, setAccountId] = useState(card.accountId || '');
+  const [payAmount, setPayAmount] = useState(amount);
   return (
     <Modal title={`Pagar fatura — ${card.bank}`} onClose={onClose}>
       <div className="space-y-4">
-        <div className="rounded-xl p-4 text-center" style={{ backgroundColor: 'var(--bg)' }}>
-          <p className="text-xs mb-1" style={{ color: 'var(--text-soft)' }}>Valor da fatura</p>
-          <p className="font-display text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(amount)}</p>
+        <div>
+          <FieldLabel>Valor a pagar</FieldLabel>
+          <CurrencyInput value={payAmount} onChange={setPayAmount} />
+          {payAmount !== amount && (
+            <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
+              {payAmount < amount ? `Pagamento parcial — ${formatBRL(amount - payAmount)} continuam em aberto nessa fatura.` : `Isso deixa a fatura ${formatBRL(payAmount - amount)} adiantada (mais do que o valor em aberto hoje).`}
+            </p>
+          )}
         </div>
         <div>
           <FieldLabel>Debitar de qual conta?</FieldLabel>
           <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl text-base sm:text-sm focus-ring" style={inputStyle}>
-            <option value="">Nenhuma (só marcar como paga)</option>
+            <option value="">Nenhuma (só registrar o pagamento)</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
           </Select>
           <p className="text-xs mt-1.5" style={{ color: 'var(--text-soft)' }}>
-            {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só a fatura é marcada como paga.'}
+            {accountId ? 'O saldo dessa conta é descontado automaticamente — sem precisar atualizar o valor na mão.' : 'O saldo de nenhuma conta será alterado, só o pagamento é registrado na fatura.'}
           </p>
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { onConfirm(accountId || null); onClose(); }}>Confirmar pagamento</Button>
+          <Button onClick={() => { onConfirm(accountId || null, payAmount); onClose(); }} disabled={!payAmount || payAmount <= 0}>Confirmar pagamento</Button>
         </div>
       </div>
     </Modal>
@@ -2882,7 +2898,7 @@ function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, mo
     const monthItems = subview === 'todas'
       ? transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && isSameMonth(t.date, year, month))
       : cycleItems;
-    return { displayInvoice: monthItems.reduce((s, t) => s + t.amount, 0), displayCount: monthItems.length };
+    return { displayInvoice: Math.max(0, monthItems.reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0)), displayCount: monthItems.length };
   }, [card, transactions, year, month, subview]);
 
   return (
@@ -2914,10 +2930,10 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   const isHistoricalView = !!viewedCycle;
   const invoice = useMemo(() => {
     if (isHistoricalView) {
-      return transactions
+      return Math.max(0, transactions
         .filter((t) => t.type === 'despesa' && t.cardId === card.id)
         .filter((t) => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })
-        .reduce((s, t) => s + t.amount, 0);
+        .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0));
     }
     return computeCardInvoice(card, transactions);
   }, [card, transactions, isHistoricalView, viewedCycle?.year, viewedCycle?.month]);
@@ -2939,7 +2955,12 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
     return transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
   }, [card.id, transactions, openClosing]);
   const futureTotal = futureInstallments.reduce((s, t) => s + t.amount, 0);
-  const pendingInvoiceCount = useMemo(() => transactions.filter((t) => t.cardId === card.id && t.status === 'Pendente').length, [transactions, card.id]);
+  // Saldo em aberto somando TODOS os ciclos desse cartão (não só o atual) — usado só pra avisar
+  // antes de excluir o cartão, se ainda sobrar alguma fatura não quitada em algum mês.
+  const hasOutstandingBalance = useMemo(() => {
+    const net = transactions.filter((t) => t.cardId === card.id && t.type === 'despesa').reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0);
+    return net > 0.004;
+  }, [transactions, card.id]);
   return (
     <div className="rounded-2xl p-5 text-white shadow-soft-lg" style={{ background: gradient }}>
       <div className="flex items-start justify-between mb-6">
@@ -2988,9 +3009,6 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
               {dueWasAdjusted && <span className="block opacity-70">(dia {card.dueDay}, antecipado p/ dia útil)</span>}
             </span>
           </div>
-          {card.paidThroughDate && (
-            <p className="text-[11px] opacity-60 mt-2">Fatura paga até {formatDate(card.paidThroughDate)}</p>
-          )}
           {futureInstallments.length > 0 && onAdvanceInstallments && (
             <button onClick={() => setConfirmAdvance(true)} className="w-full mt-3 pt-3 text-xs text-left flex items-center justify-between gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
               <span className="opacity-80">{futureInstallments.length} parcela(s) futura(s) — {formatBRL(futureTotal)}</span>
@@ -3000,10 +3018,10 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
         </>
       )}
       {showPayModal && (
-        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId) => onPayInvoice(card, invoice, accountId)} onClose={() => setShowPayModal(false)} />
+        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId, payAmount) => onPayInvoice(card, payAmount, accountId)} onClose={() => setShowPayModal(false)} />
       )}
       {showEditForm && (
-        <CardForm initial={card} accounts={accounts} pendingInvoiceCount={pendingInvoiceCount} onSave={(f) => { onEdit(f); setShowEditForm(false); }} onDelete={onDelete} onClose={() => setShowEditForm(false)} />
+        <CardForm initial={card} accounts={accounts} hasOutstandingBalance={hasOutstandingBalance} onSave={(f) => { onEdit(f); setShowEditForm(false); }} onDelete={onDelete} onClose={() => setShowEditForm(false)} />
       )}
       {confirmAdvance && (
         <ConfirmModal
@@ -3329,7 +3347,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const installmentTotal = installmentSource === 'total' ? installmentRawTotal : Math.round(installmentRawPerValue * installmentCount * 100) / 100;
   const perInstallment = installmentSource === 'perValue' ? installmentRawPerValue : (installmentCount > 0 ? Math.round((installmentRawTotal / installmentCount) * 100) / 100 : 0);
   const isEditingInstallment = !!initial?.installmentGroupId;
-  const canToggleInstallments = !isEditingInstallment;
+  const canToggleInstallments = !isEditingInstallment && !form.isInvoicePayment;
   const currentInvoiceCycle = useMemo(
     () => (isEditingInstallment && selectedCard ? getCardInvoiceCycle(selectedCard, form.date) : null),
     [isEditingInstallment, selectedCard, form.date]
@@ -3608,10 +3626,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           </div>
           <div>
             <FieldLabel>Status</FieldLabel>
-            <Select value={form.status} disabled={installmentEnabled && canToggleInstallments} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: installmentEnabled && canToggleInstallments ? 0.6 : 1 }}>
+            <Select value={form.status} disabled={(installmentEnabled && canToggleInstallments) || !!form.cardId} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputClass} style={{ ...inputStyle, opacity: (installmentEnabled && canToggleInstallments) || !!form.cardId ? 0.6 : 1 }}>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusLabel(s, form.type)}</option>)}
             </Select>
-            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Marcar como Pago aqui só sinaliza esse lançamento — não desconta de conta nenhuma. Pra pagar (ou adiantar) a fatura de verdade, use a aba Cartões.</p>}
+            {form.cardId && <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>{form.isInvoicePayment ? 'Pagamento de fatura: já registrado, abate o valor da fatura.' : 'Compra no cartão: pra pagar a fatura (total ou parcial), use a aba Cartões — o pagamento entra aqui na fatura como um lançamento.'}</p>}
           </div>
         </div>
         {duplicateWarning && (
@@ -4533,8 +4551,8 @@ function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccoun
    PÁGINA: CARTÕES
    ============================================================ */
 
-function CardForm({ initial, accounts, pendingInvoiceCount = 0, onSave, onDelete, onClose }) {
-  const [form, setForm] = useState(initial || { bank: '', brand: '', accountId: accounts[0]?.id || '', limit: 0, closingDay: 1, dueDay: 10, paidThroughDate: null });
+function CardForm({ initial, accounts, hasOutstandingBalance = false, onSave, onDelete, onClose }) {
+  const [form, setForm] = useState(initial || { bank: '', brand: '', accountId: accounts[0]?.id || '', limit: 0, closingDay: 1, dueDay: 10 });
   const [errors, setErrors] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
   const clampDay = (v) => Math.min(31, Math.max(1, Math.round(v) || 1));
@@ -4587,10 +4605,10 @@ function CardForm({ initial, accounts, pendingInvoiceCount = 0, onSave, onDelete
           </div>
         </div>
       </div>
-      {confirmDelete && (pendingInvoiceCount > 0 ? (
+      {confirmDelete && (hasOutstandingBalance ? (
         <ConfirmModal
           title="Não é possível excluir"
-          description={`Este cartão ainda tem ${pendingInvoiceCount} lançamento(s) com fatura em aberto (pendente). Pague a fatura ou edite/exclua esses lançamentos antes de excluir o cartão.`}
+          description="Este cartão ainda tem saldo em aberto em alguma fatura. Pague o que falta (ou edite/exclua os lançamentos) antes de excluir o cartão."
           confirmLabel="Entendi" variant="primary"
           onConfirm={() => setConfirmDelete(false)}
           onClose={() => setConfirmDelete(false)}
@@ -4945,14 +4963,17 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
     .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
-  const total = list.reduce((s, t) => s + t.amount, 0);
+  const total = Math.max(0, list.reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0));
   // Uma única tag resumindo a fatura inteira, em vez de repetir Pago/Pendente em cada linha (que
-  // normalmente é tudo igual, já que o pagamento acontece de uma vez pra fatura toda).
+  // normalmente é tudo igual, já que o pagamento acontece de uma vez pra fatura toda). Compara
+  // cobranças com pagamentos do ciclo (o mesmo saldo líquido usado em todo o resto do app), não
+  // mais o status individual de cada lançamento — pagamento parcial já aparece certinho aqui.
   const faturaStatus = useMemo(() => {
     if (subview !== 'fatura' || faturaTx.length === 0) return null;
-    const paidCount = faturaTx.filter((t) => t.status === 'Pago').length;
-    if (paidCount === faturaTx.length) return { label: 'Fatura paga', color: 'var(--income)', soft: 'var(--income-soft)' };
-    if (paidCount === 0) return { label: 'Fatura pendente', color: 'var(--alert)', soft: 'var(--alert-soft)' };
+    const charges = faturaTx.filter((t) => !t.isInvoicePayment).reduce((s, t) => s + t.amount, 0);
+    const paid = faturaTx.filter((t) => t.isInvoicePayment).reduce((s, t) => s + t.amount, 0);
+    if (paid <= 0) return { label: 'Fatura pendente', color: 'var(--alert)', soft: 'var(--alert-soft)' };
+    if (paid >= charges) return { label: 'Fatura paga', color: 'var(--income)', soft: 'var(--income-soft)' };
     return { label: 'Fatura paga parcialmente', color: 'var(--alert)', soft: 'var(--alert-soft)' };
   }, [subview, faturaTx]);
 
@@ -5082,7 +5103,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                 modo de seleção, o swipe fica desligado e tocar na linha marca/desmarca. */}
             <div className="sm:hidden space-y-2">
               {list.map((t) => {
-                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const cat = t.isInvoicePayment ? { icon: Banknote, color: 'var(--income)', soft: 'var(--income-soft)' } : (CATEGORIES[t.category] || CATEGORIES['Outros']);
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
                 const acc = !card ? accounts.find((a) => a.id === t.account) : null;
                 const inst = getInstallmentDisplay(t);
@@ -5101,7 +5122,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                           <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
                           {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
                         </div>
-                        <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                        <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: t.isInvoicePayment ? 'var(--income)' : 'var(--expense)' }}>{t.isInvoicePayment ? '- ' : ''}{formatBRL(t.amount)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 text-xs">
                         <span className="truncate" style={{ color: 'var(--text-soft)' }}>
@@ -5138,7 +5159,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
             {/* Desktop/tablet: linha única, como antes. */}
             <div className="hidden sm:block space-y-1">
               {list.map((t) => {
-                const cat = CATEGORIES[t.category] || CATEGORIES['Outros'];
+                const cat = t.isInvoicePayment ? { icon: Banknote, color: 'var(--income)', soft: 'var(--income-soft)' } : (CATEGORIES[t.category] || CATEGORIES['Outros']);
                 const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
                 const acc = !card ? accounts.find((a) => a.id === t.account) : null;
                 const inst = getInstallmentDisplay(t);
@@ -5169,7 +5190,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
                     {!selectionMode && onMarkPaid && t.status === 'Pendente' && !t.cardId && (
                       <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
                     )}
-                    <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: 'var(--expense)' }}>{formatBRL(t.amount)}</span>
+                    <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: t.isInvoicePayment ? 'var(--income)' : 'var(--expense)' }}>{t.isInvoicePayment ? '- ' : ''}{formatBRL(t.amount)}</span>
                     {!selectionMode && onEditTransaction && (
                       <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
                     )}
@@ -6880,39 +6901,29 @@ export default function App() {
   // saldo da conta cair e "zera" a fatura calculada do cartão a partir de hoje. Se o usuário
   // escolher "nenhuma conta", o pagamento só marca a fatura como quitada, sem mexer em saldo
   // (útil pra quem paga por fora do que é acompanhado no dashboard).
+  // Pagar a fatura agora só cria UM lançamento de pagamento (isInvoicePayment), com cardId do
+  // cartão pago — ele aparece dentro da própria fatura daquele cartão (na aba Fatura mensal e em
+  // "Meus cartões"), com valor em verde, igual um lançamento normal (dá pra editar ou excluir
+  // depois, se o valor ou a data estiverem errados). O valor em aberto de cada ciclo é sempre
+  // "cobranças menos pagamentos" (computeCardInvoice), então um pagamento parcial já reflete
+  // certinho, sem precisar marcar lançamento por lançamento como pago.
   function payCardInvoice(card, amount, accountId) {
     const today = new Date().toISOString().slice(0, 10);
-    const cutoff = ymd(getOpenInvoiceClosingDate(card));
-    // Todo lançamento Pendente neste cartão até o fechamento do ciclo em aberto passa a Pago —
-    // é isso que faz o status refletir "fatura paga" nas abas de Transações e Fatura mensal.
-    // Vai só por status, não mais por data/paidThroughDate: se o pagamento fosse adiantado (antes
-    // do fechamento do ciclo), filtrar por data faria um lançamento futuro pendente escapar da
-    // cobertura por pura coincidência de já ter passado da referência salva — status é sempre
-    // exato, cobre exatamente o que ainda estava em aberto nesse ciclo, nem mais nem menos.
-    const coveredTransactions = transactions.map((t) => (
-      t.cardId === card.id && t.type === 'despesa' && t.status === 'Pendente' && t.date <= cutoff
-        ? { ...t, status: 'Pago' }
-        : t
-    ));
     const newTx = {
-      id: uid(), description: `Fatura ${card.bank}`, amount, category: 'Outros', type: 'despesa',
-      account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
+      id: uid(), description: `Pagamento fatura ${card.bank}`, amount, category: 'Outros', type: 'despesa',
+      cardId: card.id, account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
       isInvoicePayment: true,
     };
-    // paidThroughDate agora é só informativa (mostrada como "Fatura paga até X" em Meus
-    // Cartões) — o que realmente conta como coberto é o status de cada lançamento, acima.
-    const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, paidThroughDate: cutoff } : c));
-    setCards(updatedCards);
+    const updatedTransactions = [newTx, ...transactions];
     if (accountId) {
-      const updatedTransactions = [newTx, ...coveredTransactions];
       const updatedAccounts = reapplyAccountEffect(accounts, null, newTx);
       setTransactions(updatedTransactions); setAccounts(updatedAccounts);
-      persist({ transactions: updatedTransactions, accounts: updatedAccounts, cards: updatedCards });
+      persist({ transactions: updatedTransactions, accounts: updatedAccounts });
     } else {
-      setTransactions(coveredTransactions);
-      persist({ transactions: coveredTransactions, cards: updatedCards });
+      setTransactions(updatedTransactions);
+      persist({ transactions: updatedTransactions });
     }
-    addToast(`Fatura do ${card.bank} paga (${formatBRL(amount)}).`);
+    addToast(`Pagamento de ${formatBRL(amount)} registrado na fatura do ${card.bank}.`);
   }
   // Traz TODAS as parcelas futuras (ainda não vencidas) de um cartão pra fatura atual, somadas
   // numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o que
