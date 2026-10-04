@@ -613,13 +613,30 @@ function daysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(
 // fechamento do cartão — útil quando o banco atribuiu a compra a um mês diferente do que a
 // pessoa esperava (ex: compra bem perto do fechamento).
 function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
-  const cycle = getCardInvoiceCycle(card, dateStr);
-  if (direction > 0) {
-    const boundary = new Date(cycle.year, cycle.month, Math.min(card.closingDay, daysInMonth(cycle.year, cycle.month)));
-    return ymd(addDays(boundary, 1));
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDate();
+  const currentCycle = getCardInvoiceCycle(card, dateStr);
+  const targetCycleIndex = currentCycle.year * 12 + currentCycle.month + direction;
+  // Preserva o DIA original da compra (não a data toda) e só avança/recua o mês civil até achar
+  // o primeiro resultado que realmente cai no ciclo de fatura adjacente desejado — em vez de
+  // simplesmente colar a data no fechamento do ciclo (o que descartava o dia original e sempre
+  // devolvia a mesma data, não importa qual fosse a compra).
+  let month = d.getMonth();
+  let year = d.getFullYear();
+  for (let guard = 0; guard < 6; guard++) {
+    month += direction;
+    const norm = new Date(year, month, 1);
+    year = norm.getFullYear();
+    month = norm.getMonth();
+    const candidateDay = Math.min(day, daysInMonth(year, month));
+    const candidateDate = ymd(new Date(year, month, candidateDay));
+    const candidateCycle = getCardInvoiceCycle(card, candidateDate);
+    if (candidateCycle.year * 12 + candidateCycle.month === targetCycleIndex) return candidateDate;
   }
-  const prevRef = new Date(cycle.year, cycle.month - 1, 1);
-  return ymd(new Date(prevRef.getFullYear(), prevRef.getMonth(), Math.min(card.closingDay, daysInMonth(prevRef.getFullYear(), prevRef.getMonth()))));
+  // Nunca deveria chegar aqui (o loop acima resolve em no máximo 2 iterações na prática), mas por
+  // segurança ainda preserva o dia original no mês civil alcançado.
+  const candidateDay = Math.min(day, daysInMonth(year, month));
+  return ymd(new Date(year, month, candidateDay));
 }
 
 // Acha o FECHAMENTO (não o vencimento) do ciclo em aberto agora — a fronteira real que separa
@@ -662,33 +679,72 @@ function addDays(date, days) {
   d.setDate(d.getDate() + days);
   return d;
 }
+// Descreve em texto a frequência de uma despesa recorrente, com base no intervalo em dias.
+function describeRecurringSchedule(item) {
+  const days = item.intervalDays || 30;
+  if (days === 7) return 'Toda semana';
+  if (days === 14) return 'A cada 2 semanas';
+  if (days === 30 || days === 31) return 'Renova todo mês';
+  if (days % 30 === 0) return `A cada ${days / 30} meses`;
+  return `A cada ${days} dias`;
+}
+// Normaliza o valor de uma despesa recorrente de frequência arbitrária para um equivalente
+// mensal estimado, usado nos totais/gráficos agregados (que assumem base mensal).
+function monthlyEquivalent(item) {
+  return item.value * (30 / (item.intervalDays || 30));
+}
 // Gera as ocorrências futuras (até `monthsAhead` meses a partir de hoje) de uma despesa
 // recorrente como lançamentos de verdade, marcados com recurringId (permite editar/excluir em
 // lote depois). Sempre nasce como "Pendente" — mesmo em débito — pra nunca descontar da conta
 // silenciosamente um valor que ainda não aconteceu; a pessoa confirma normalmente quando o
-// lançamento vence, do mesmo jeito que já funciona pra débito agendado. Nunca gera pra um mês
-// que já tem um lançamento com o mesmo nome (evita duplicar uma cobrança lançada manualmente
+// lançamento vence, do mesmo jeito que já funciona pra débito agendado. Nunca gera duas
+// ocorrências muito próximas da mesma despesa (evita duplicar uma cobrança lançada manualmente
 // antes dessa função existir, ou lançada via "Lançar agora").
 function generateRecurringOccurrences(item, cards, existingTransactions, monthsAhead = 12) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const card = item.cardId ? cards.find((c) => c.id === item.cardId) : null;
   const occurrences = [];
-  for (let i = 0; i <= monthsAhead; i++) {
-    const cursor = new Date(today.getFullYear(), today.getMonth() + i, 1);
-    const day = Math.min(item.renewalDay, daysInMonth(cursor.getFullYear(), cursor.getMonth()));
-    const occDate = new Date(cursor.getFullYear(), cursor.getMonth(), day);
-    if (i === 0 && occDate < today) continue; // já passou esse mês — não gera retroativo
+  const intervalDays = item.intervalDays || 30;
+  // Compatibilidade com itens antigos que só tinham `renewalDay` (dia do mês): reconstrói um
+  // anchorDate equivalente (o renewalDay deste mês ou do mês passado, o que for mais recente).
+  let anchor;
+  if (item.anchorDate) {
+    anchor = new Date(item.anchorDate + 'T00:00:00');
+  } else if (item.renewalDay) {
+    const day = Math.min(item.renewalDay, daysInMonth(today.getFullYear(), today.getMonth()));
+    anchor = new Date(today.getFullYear(), today.getMonth(), day);
+    if (anchor > today) anchor.setMonth(anchor.getMonth() - 1);
+  } else {
+    anchor = new Date(today);
+  }
+  anchor.setHours(0, 0, 0, 0);
+  const horizon = new Date(today.getFullYear(), today.getMonth() + monthsAhead, today.getDate());
+  // Acha a primeira ocorrência (a partir do anchor, andando de intervalDays em intervalDays) que
+  // ainda não passou.
+  let occDate = new Date(anchor);
+  if (occDate < today) {
+    const diff = Math.floor((today - occDate) / 86400000);
+    const steps = Math.ceil(diff / intervalDays);
+    occDate = addDays(occDate, steps * intervalDays);
+  }
+  let guard = 0;
+  while (occDate <= horizon && guard < 500) {
+    guard++;
+    const occYmd = ymd(occDate);
     const alreadyExists = existingTransactions.some((t) =>
-      t.type === 'despesa' && t.description === item.name && isSameMonth(t.date, cursor.getFullYear(), cursor.getMonth())
+      t.type === 'despesa' && (t.recurringId === item.id || t.description === item.name) &&
+      Math.abs((new Date(t.date + 'T00:00:00') - occDate) / 86400000) < Math.max(3, intervalDays / 4)
     );
-    if (alreadyExists) continue;
-    occurrences.push({
-      id: uid(), description: item.name, amount: item.value, category: item.category, type: 'despesa',
-      account: card ? card.accountId : (item.accountId || null), cardId: card ? card.id : null,
-      paymentMethod: card ? 'Cartão de crédito' : 'Não informado',
-      date: ymd(occDate), status: 'Pendente', recurringId: item.id,
-    });
+    if (!alreadyExists) {
+      occurrences.push({
+        id: uid(), description: item.name, amount: item.value, category: item.category, type: 'despesa',
+        account: card ? card.accountId : (item.accountId || null), cardId: card ? card.id : null,
+        paymentMethod: card ? 'Cartão de crédito' : 'Não informado',
+        date: occYmd, status: 'Pendente', recurringId: item.id,
+      });
+    }
+    occDate = addDays(occDate, intervalDays);
   }
   return occurrences;
 }
@@ -1258,10 +1314,35 @@ async function saveAppData(data) {
 
 /* ---------- Insights inteligentes ---------- */
 
-function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = [], cards = [], categoryComparison }) {
+function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = [], cards = [], categoryComparison, recurring = [] }) {
   const insights = [];
   const thisMonth = mh[mh.length - 1];
   const lastMonth = mh.length > 1 ? mh[mh.length - 2] : null;
+
+  // Despesas recorrentes: avisa ~7 dias antes do fim do ciclo (possível compra chegando) e no
+  // próprio dia do ciclo, confirma que o lançamento já foi gerado automaticamente.
+  const today0 = new Date();
+  today0.setHours(0, 0, 0, 0);
+  recurring.forEach((item) => {
+    const match = transactions.find((t) =>
+      t.type === 'despesa' && t.recurringId === item.id && t.status === 'Pendente' &&
+      new Date(t.date + 'T00:00:00') >= today0
+    );
+    if (!match) return;
+    const occDate = new Date(match.date + 'T00:00:00');
+    const daysLeft = Math.round((occDate - today0) / 86400000);
+    if (daysLeft === 0) {
+      insights.unshift({
+        icon: RefreshCw, tone: 'expense',
+        text: `"${item.name}" foi lançado hoje (${formatBRL(item.value)}) — confira o valor e a data, ou cancele esta ocorrência se não for acontecer.`,
+      });
+    } else if (daysLeft > 0 && daysLeft <= 7) {
+      insights.push({
+        icon: CalendarIcon, tone: 'alert',
+        text: `Faltam ${daysLeft} dia(s) para o próximo "${item.name}" (${formatBRL(item.value)}), ${describeRecurringSchedule(item).toLowerCase()}.`,
+      });
+    }
+  });
 
   accounts.filter((a) => a.alertThreshold > 0 && a.balance <= a.alertThreshold).forEach((a) => {
     insights.unshift({
@@ -1874,24 +1955,37 @@ function FieldLabel({ children, error }) {
 // pedir pra digitar o sinal, um botão alterna entre positivo/negativo e o campo edita só a
 // magnitude — funciona igual em qualquer teclado.
 function SignedCurrencyInput({ value, onChange, placeholder }) {
-  const isNegative = value < 0;
+  // O sinal é um estado próprio, independente do valor digitado — assim dá pra marcar "negativo"
+  // primeiro (com o campo ainda zerado) e só depois digitar o número, sem precisar digitar um
+  // valor positivo e inverter depois. Antes o sinal vinha de `value < 0`: com valor 0, isso nunca
+  // é verdadeiro (-0 não é negativo), então o botão não "pegava" até já existir um valor digitado.
+  const [negative, setNegative] = useState(value < 0);
+  // Se o valor vier de fora já com um sinal definido (ex: editando uma conta existente), segue
+  // esse sinal — mas só quando o valor não é zero, pra não sobrescrever uma escolha de "negativo"
+  // feita com o campo ainda vazio.
+  useEffect(() => { if (value !== 0) setNegative(value < 0); }, [value]);
+  function toggleSign() {
+    const next = !negative;
+    setNegative(next);
+    onChange(next ? -Math.abs(value) : Math.abs(value));
+  }
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={() => onChange(-value)}
-        title={isNegative ? 'Tornar positivo' : 'Tornar negativo (conta no vermelho)'}
+        onClick={toggleSign}
+        title={negative ? 'Tornar positivo' : 'Tornar negativo (conta no vermelho)'}
         className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center font-display font-bold text-lg focus-ring transition-colors"
         style={{
-          backgroundColor: isNegative ? 'var(--expense-soft)' : 'var(--bg)',
-          color: isNegative ? 'var(--expense)' : 'var(--text-soft)',
+          backgroundColor: negative ? 'var(--expense-soft)' : 'var(--bg)',
+          color: negative ? 'var(--expense)' : 'var(--text-soft)',
           border: '1px solid var(--border)',
         }}
       >
-        {isNegative ? '−' : '+'}
+        {negative ? '−' : '+'}
       </button>
       <div className="flex-1">
-        <CurrencyInput value={Math.abs(value)} onChange={(v) => onChange(isNegative ? -v : v)} placeholder={placeholder} />
+        <CurrencyInput value={Math.abs(value)} onChange={(v) => onChange(negative ? -v : v)} placeholder={placeholder} />
       </div>
     </div>
   );
@@ -2725,7 +2819,7 @@ function GoalsSection({ goals, onAddFunds, onDelete, onCompleted, onSeeAll, comp
 
 /* ---------- Calendário financeiro ---------- */
 
-function FinancialCalendar({ cards, transactions }) {
+function FinancialCalendar({ cards, transactions, onNewTransaction }) {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [selectedDay, setSelectedDay] = useState(null);
   const year = viewDate.getFullYear(), month = viewDate.getMonth();
@@ -2810,9 +2904,21 @@ function FinancialCalendar({ cards, transactions }) {
       </div>
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         {selectedDay ? (
-          <button onClick={() => setSelectedDay(null)} className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
-            Dia {selectedDay} <X size={11} />
-          </button>
+          <>
+            <button onClick={() => setSelectedDay(null)} className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>
+              Dia {selectedDay} <X size={11} />
+            </button>
+            {onNewTransaction && (
+              <button
+                type="button"
+                onClick={() => onNewTransaction(ymd(new Date(year, month, selectedDay)), 'despesa')}
+                className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full"
+                style={{ backgroundColor: 'var(--expense-soft)', color: 'var(--expense)' }}
+              >
+                <Plus size={11} /> Lançar despesa
+              </button>
+            )}
+          </>
         ) : (
           <>
             <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-soft)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eventColors.gasto }} /> Gasto</span>
@@ -3024,15 +3130,77 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
         <CardForm initial={card} accounts={accounts} hasOutstandingBalance={hasOutstandingBalance} onSave={(f) => { onEdit(f); setShowEditForm(false); }} onDelete={onDelete} onClose={() => setShowEditForm(false)} />
       )}
       {confirmAdvance && (
-        <ConfirmModal
-          title="Antecipar parcelas futuras"
-          description={`Isso traz ${futureInstallments.length} parcela(s) que ainda não venceram (totalizando ${formatBRL(futureTotal)}) para a fatura atual, quitando o restante da compra de uma vez.`}
-          variant="primary" confirmLabel="Antecipar"
-          onConfirm={() => onAdvanceInstallments(card)}
+        <AdvanceInstallmentsModal
+          installments={futureInstallments}
+          onConfirm={(selectedIds) => { onAdvanceInstallments(card, selectedIds); setConfirmAdvance(false); }}
           onClose={() => setConfirmAdvance(false)}
         />
       )}
     </div>
+  );
+}
+
+// Checklist de parcelas futuras pra antecipar — em vez de trazer todas de uma vez (o que era
+// confuso quando havia parcelas de compras diferentes), o usuário marca exatamente quais quer
+// antecipar agora, deixando as outras pra seguir no próprio mês.
+function AdvanceInstallmentsModal({ installments, onConfirm, onClose }) {
+  const sorted = useMemo(() => [...installments].sort((a, b) => a.date.localeCompare(b.date)), [installments]);
+  const [selected, setSelected] = useState(() => new Set(sorted.map((t) => t.id)));
+  const allSelected = selected.size === sorted.length;
+  function toggle(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map((t) => t.id)));
+  }
+  const selectedTotal = sorted.filter((t) => selected.has(t.id)).reduce((s, t) => s + t.amount, 0);
+  return (
+    <Modal title="Antecipar parcelas futuras" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Selecione quais parcelas quer trazer para a fatura atual.</p>
+          <button type="button" onClick={toggleAll} className="text-xs font-medium shrink-0" style={{ color: 'var(--primary)' }}>
+            {allSelected ? 'Desmarcar todas' : 'Selecionar todas'}
+          </button>
+        </div>
+        <div className="max-h-72 overflow-y-auto space-y-1.5 -mx-1 px-1">
+          {sorted.map((t) => {
+            const isChecked = selected.has(t.id);
+            const cleanDesc = t.description.replace(/\s*\(\d+\/\d+\)\s*$/, '');
+            return (
+              <label
+                key={t.id}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer"
+                style={{ backgroundColor: isChecked ? 'var(--primary-soft)' : 'var(--bg)' }}
+              >
+                <input type="checkbox" checked={isChecked} onChange={() => toggle(t.id)} className="w-5 h-5 shrink-0 focus-ring" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{cleanDesc}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-soft)' }}>
+                    Parcela {t.installmentIndex}/{t.installmentCount} · {new Date(t.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                  </p>
+                </div>
+                <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(t.amount)}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <div>
+            <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Total selecionado</p>
+            <p className="font-display text-lg font-bold tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(selectedTotal)}</p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+            <Button onClick={() => onConfirm([...selected])} disabled={selected.size === 0}>Antecipar</Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -3071,10 +3239,10 @@ function CardsPreview({ cards, transactions, accounts, cardGradients, onPayInvoi
 /* ---------- Assinaturas / Despesas recorrentes (preview) ---------- */
 
 function RecurringPreview({ recurring, onSeeAll }) {
-  const total = recurring.reduce((s, r) => s + r.value, 0);
+  const total = recurring.reduce((s, r) => s + monthlyEquivalent(r), 0);
   return (
     <Card className="animate-fade-up" padding="p-5 sm:p-6">
-      <SectionTitle subtitle={`${formatBRL(total)}/mês`} action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
+      <SectionTitle subtitle={`~${formatBRL(total)}/mês`} action={<button onClick={onSeeAll} className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--primary)' }}>Ver todas <ArrowRight size={12} /></button>}>
         Despesas recorrentes
       </SectionTitle>
       <div className="space-y-3">
@@ -3085,7 +3253,7 @@ function RecurringPreview({ recurring, onSeeAll }) {
               <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
-                <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</p>
+                <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{describeRecurringSchedule(r)}</p>
               </div>
               <span className="text-sm tabular-nums font-medium" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
             </div>
@@ -3212,8 +3380,8 @@ function DashboardPage({ data, actions }) {
       {v('goalsSection') && <GoalsSection goals={data.goals} onAddFunds={actions.addGoalFunds} onDelete={actions.deleteGoal} onSeeAll={() => actions.goTo('metas')} compact />}
       {showCalendarCardsRow && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {v('financialCalendar') && <div className={v('cardsPreview') ? '' : 'lg:col-span-2'}><FinancialCalendar cards={data.cards} transactions={data.transactions} /></div>}
-          {v('cardsPreview') && <div className={v('financialCalendar') ? '' : 'lg:col-span-2'}><CardsPreview cards={data.cards} transactions={data.transactions} accounts={data.accounts} cardGradients={data.cardGradients} onPayInvoice={actions.payCardInvoice} onAdvanceInstallments={actions.advanceAllFutureInstallments} onSeeAll={() => actions.goTo('cartoes')} /></div>}
+          {v('financialCalendar') && <div className={v('cardsPreview') ? '' : 'lg:col-span-2'}><FinancialCalendar cards={data.cards} transactions={data.transactions} onNewTransaction={actions.onNewTransaction} /></div>}
+          {v('cardsPreview') && <div className={v('financialCalendar') ? '' : 'lg:col-span-2'}><CardsPreview cards={data.cards} transactions={data.transactions} accounts={data.accounts} cardGradients={data.cardGradients} onPayInvoice={actions.payCardInvoice} onAdvanceInstallments={actions.advanceInstallments} onSeeAll={() => actions.goTo('cartoes')} /></div>}
         </div>
       )}
       {showPreviewRow && (
@@ -3231,10 +3399,10 @@ function DashboardPage({ data, actions }) {
    FORMULÁRIO DE TRANSAÇÃO
    ============================================================ */
 
-function TransactionForm({ initial, accounts, cards, benefits = [], transactions = [], onSave, onClose, onDelete }) {
+function TransactionForm({ initial, accounts, cards, benefits = [], transactions = [], onSave, onClose, onDelete, prefillDate, prefillType }) {
   const [form, setForm] = useState(initial || {
-    type: 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
-    paymentMethod: 'Pix', date: new Date().toISOString().slice(0, 10), status: 'Pago',
+    type: prefillType || 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
+    paymentMethod: 'Pix', date: prefillDate || new Date().toISOString().slice(0, 10), status: 'Pago',
     isSalary: false, grossSalary: 0, dependents: 0, cardId: null, benefitId: null, benefitType: null,
   });
   const [errors, setErrors] = useState({});
@@ -3348,9 +3516,13 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const perInstallment = installmentSource === 'perValue' ? installmentRawPerValue : (installmentCount > 0 ? Math.round((installmentRawTotal / installmentCount) * 100) / 100 : 0);
   const isEditingInstallment = !!initial?.installmentGroupId;
   const canToggleInstallments = !isEditingInstallment && !form.isInvoicePayment;
+  // "Mover para fatura adjacente" vale pra qualquer lançamento de cartão já existente (não só
+  // parcelas) — útil sempre que o banco atribuiu a compra a um mês de fatura diferente do
+  // esperado, o que acontece bem perto do fechamento mesmo em compras à vista.
+  const canMoveCycle = !!initial && !!selectedCard && !form.isInvoicePayment;
   const currentInvoiceCycle = useMemo(
-    () => (isEditingInstallment && selectedCard ? getCardInvoiceCycle(selectedCard, form.date) : null),
-    [isEditingInstallment, selectedCard, form.date]
+    () => (canMoveCycle ? getCardInvoiceCycle(selectedCard, form.date) : null),
+    [canMoveCycle, selectedCard, form.date]
   );
 
   function validate() {
@@ -3482,10 +3654,10 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           </div>
         )}
 
-        {isEditingInstallment && selectedCard && currentInvoiceCycle && (
+        {canMoveCycle && currentInvoiceCycle && (
           <div className="rounded-xl p-3 text-xs space-y-2" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
             <p style={{ color: 'var(--text-soft)' }}>
-              Está na fatura de <strong style={{ color: 'var(--text)' }}>{capitalizeFirst(new Date(currentInvoiceCycle.year, currentInvoiceCycle.month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</strong>. Se o banco colocou essa compra num mês diferente do esperado (comum perto do fechamento), dá pra mover a parcela:
+              Está na fatura de <strong style={{ color: 'var(--text)' }}>{capitalizeFirst(new Date(currentInvoiceCycle.year, currentInvoiceCycle.month, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</strong>. Se o banco colocou essa compra num mês diferente do esperado (comum perto do fechamento), dá pra mover {isEditingInstallment ? 'a parcela' : 'o lançamento'} pra fatura anterior ou seguinte — o dia original da compra é mantido, só a fatura em que ela cai muda:
             </p>
             <div className="flex gap-2">
               <button type="button" onClick={() => setForm({ ...form, date: shiftToAdjacentInvoiceCycle(selectedCard, form.date, -1) })} className="flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center justify-center gap-1" style={{ color: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}>
@@ -5563,8 +5735,8 @@ function GoalsPage({ goals, onAdd, onEdit, onAddFunds, onDelete, onCompleted }) 
 
 function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, onLaunchNow, onDelete }) {
   const [form, setForm] = useState(() => initial
-    ? { ...initial }
-    : { name: '', category: 'Lazer', value: 0, renewalDay: 1, cardId: null, accountId: accounts[0]?.id || '' });
+    ? { ...initial, intervalDays: initial.intervalDays || 30, anchorDate: initial.anchorDate || ymd(new Date()) }
+    : { name: '', category: 'Lazer', value: 0, intervalDays: 30, anchorDate: ymd(new Date()), cardId: null, accountId: accounts[0]?.id || '' });
   const [error, setError] = useState('');
   const isEditing = !!initial;
 
@@ -5580,20 +5752,27 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
           <FieldLabel error={error}>Nome</FieldLabel>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Academia" />
         </div>
+        <div>
+          <FieldLabel>Categoria</FieldLabel>
+          <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
+            {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <FieldLabel>Categoria</FieldLabel>
-            <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputClass} style={inputStyle}>
-              {CATEGORY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
+            <FieldLabel>A cada quantos dias</FieldLabel>
+            <input type="number" inputMode="numeric" min={1} value={form.intervalDays} onChange={(e) => setForm({ ...form, intervalDays: Math.max(1, Number(e.target.value)) })} className={inputClass} style={inputStyle} />
           </div>
           <div>
-            <FieldLabel>Dia da renovação</FieldLabel>
-            <input type="number" inputMode="numeric" min={1} max={31} value={form.renewalDay} onChange={(e) => setForm({ ...form, renewalDay: Number(e.target.value) })} className={inputClass} style={inputStyle} />
+            <FieldLabel>{form.intervalDays === 30 || form.intervalDays === 31 ? 'Quando acontece' : 'Quando começa'}</FieldLabel>
+            <input type="date" value={form.anchorDate} onChange={(e) => setForm({ ...form, anchorDate: e.target.value })} className={inputClass} style={inputStyle} />
           </div>
         </div>
+        <p className="text-xs -mt-2" style={{ color: 'var(--text-soft)' }}>
+          {describeRecurringSchedule(form)}, a partir de {form.anchorDate ? new Date(form.anchorDate + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}.
+        </p>
         <div>
-          <FieldLabel>Valor mensal</FieldLabel>
+          <FieldLabel>Valor por ocorrência</FieldLabel>
           <CurrencyInput value={form.value} onChange={(v) => setForm({ ...form, value: v })} />
         </div>
         <div>
@@ -5627,7 +5806,7 @@ function RecurringForm({ accounts = [], cards = [], initial, onSave, onClose, on
         )}
         <div className="flex items-center justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
+          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } if (!form.intervalDays || form.intervalDays < 1) { setError('Informe a frequência em dias'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
         </div>
       </div>
     </Modal>
@@ -5639,9 +5818,9 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
   const [editingItem, setEditingItem] = useState(null);
   const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
   const [activeBarIndex, setActiveBarIndex] = useState(null);
-  const total = recurring.reduce((s, r) => s + r.value, 0);
+  const total = recurring.reduce((s, r) => s + monthlyEquivalent(r), 0);
   const byCategory = {};
-  recurring.forEach((r) => { byCategory[r.category] = (byCategory[r.category] || 0) + r.value; });
+  recurring.forEach((r) => { byCategory[r.category] = (byCategory[r.category] || 0) + monthlyEquivalent(r); });
   const chartData = Object.entries(byCategory)
     .map(([name, value]) => ({ name, value, color: (CATEGORIES[name] || CATEGORIES['Outros']).color }))
     .sort((a, b) => b.value - a.value);
@@ -5649,8 +5828,8 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
   const showChart = isVisible(settings, 'recorrentes', 'categoryChart');
 
   const kpiCards = [
-    { key: 'kpiTotalMensal', title: 'Total recorrente mensal', value: formatBRL(total), description: `${recurring.length} assinaturas e despesas fixas`, icon: RefreshCw, color: 'var(--primary)', soft: 'var(--primary-soft)' },
-    { key: 'kpiTotalAnual', title: 'Total anual estimado', value: formatBRL(total * 12), description: 'Projeção com base no valor atual', icon: CalendarIcon, color: 'var(--invest)', soft: 'var(--invest-soft)' },
+    { key: 'kpiTotalMensal', title: 'Média mensal estimada', value: formatBRL(total), description: `${recurring.length} assinaturas e despesas fixas`, icon: RefreshCw, color: 'var(--primary)', soft: 'var(--primary-soft)' },
+    { key: 'kpiTotalAnual', title: 'Total anual estimado', value: formatBRL(total * 12), description: 'Projeção com base no valor e frequência atuais', icon: CalendarIcon, color: 'var(--invest)', soft: 'var(--invest-soft)' },
   ].filter((c) => isVisible(settings, 'recorrentes', c.key));
 
   return (
@@ -5734,7 +5913,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                             <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
                           </div>
                           <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
-                            <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                            <span className="text-xs" style={{ color: 'var(--text-soft)' }}>{describeRecurringSchedule(r)}</span>
                             {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
                           </div>
                         </div>
@@ -5762,7 +5941,7 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium break-words min-w-0" style={{ color: 'var(--text)' }}>{r.name}</p>
                         <div className="flex items-center gap-x-2 gap-y-0.5 mt-0.5 flex-wrap">
-                          <span className="text-xs" style={{ color: 'var(--text-soft)' }}>Renova dia {r.renewalDay}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-soft)' }}>{describeRecurringSchedule(r)}</span>
                           {sourceLabel && <span className="text-xs" style={{ color: 'var(--text-soft)' }}>· {sourceLabel}</span>}
                         </div>
                       </div>
@@ -6925,27 +7104,30 @@ export default function App() {
     }
     addToast(`Pagamento de ${formatBRL(amount)} registrado na fatura do ${card.bank}.`);
   }
-  // Traz TODAS as parcelas futuras (ainda não vencidas) de um cartão pra fatura atual, somadas
-  // numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o que
-  // falta de uma vez, em vez de esperar os próximos meses.
-  function advanceAllFutureInstallments(card) {
+  // Traz as parcelas futuras (ainda não vencidas) ESCOLHIDAS de um cartão pra fatura atual,
+  // somadas numa parcela só por compra parcelada — é a forma de "antecipar a compra" e quitar o
+  // que falta de uma vez, em vez de esperar os próximos meses. `selectedIds` vem da lista de
+  // seleção (checkbox) exibida no cartão — antes essa função trazia todas de uma vez, sem deixar
+  // escolher quais.
+  function advanceInstallments(card, selectedIds) {
     const cutoff = ymd(getOpenInvoiceClosingDate(card));
-    const future = transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
-    if (future.length === 0) return;
+    const idSet = new Set(selectedIds);
+    const toAdvance = transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff && idSet.has(t.id));
+    if (toAdvance.length === 0) return;
     const groups = {};
-    future.forEach((t) => { (groups[t.installmentGroupId] = groups[t.installmentGroupId] || []).push(t); });
+    toAdvance.forEach((t) => { (groups[t.installmentGroupId] = groups[t.installmentGroupId] || []).push(t); });
     const merged = Object.values(groups).map((group) => {
       const total = group.reduce((s, t) => s + t.amount, 0);
       const base = group[0];
       const cleanDesc = base.description.replace(/\s*\(\d+\/\d+\)\s*$/, '');
       return { ...base, id: uid(), amount: total, date: cutoff, description: `${cleanDesc} (parcelas antecipadas)`, installmentGroupId: null, installmentIndex: null, installmentCount: null };
     });
-    const futureIds = new Set(future.map((t) => t.id));
-    const kept = transactions.filter((t) => !futureIds.has(t.id));
+    const advancedIds = new Set(toAdvance.map((t) => t.id));
+    const kept = transactions.filter((t) => !advancedIds.has(t.id));
     const updated = [...merged, ...kept];
     setTransactions(updated); persist({ transactions: updated });
-    const total = future.reduce((s, t) => s + t.amount, 0);
-    addToast(`${future.length} parcela(s) futura(s) antecipada(s) para a fatura atual (${formatBRL(total)}).`);
+    const total = toAdvance.reduce((s, t) => s + t.amount, 0);
+    addToast(`${toAdvance.length} parcela(s) antecipada(s) para a fatura atual (${formatBRL(total)}).`);
   }
 
   /* ---- vale-benefícios ---- */
@@ -7160,8 +7342,8 @@ export default function App() {
 
   const insights = useMemo(() => {
     if (isLoading) return [];
-    return generateInsights({ transactions, goals, monthlyHistory: realMonthlyHistory, accounts, cards, categoryComparison: realCategoryComparison });
-  }, [isLoading, transactions, goals, accounts, realMonthlyHistory, realCategoryComparison]);
+    return generateInsights({ transactions, goals, monthlyHistory: realMonthlyHistory, accounts, cards, categoryComparison: realCategoryComparison, recurring });
+  }, [isLoading, transactions, goals, accounts, realMonthlyHistory, realCategoryComparison, recurring]);
 
   const filteredForSearch = useMemo(() => {
     if (!search.trim()) return null;
@@ -7205,7 +7387,8 @@ export default function App() {
   };
   const actions = {
     goTo, goToFatura, editTransaction, deleteTransaction, markTransactionPaid, addGoalFunds, deleteGoal,
-    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction, payCardInvoice, advanceAllFutureInstallments,
+    addInvestment, editInvestment, deleteInvestment, addRecurringAsTransaction, payCardInvoice, advanceInstallments,
+    onNewTransaction: (date, txType) => setModal({ type: 'newTransaction', date, txType }),
   };
 
   if (isLoading) {
@@ -7256,7 +7439,7 @@ export default function App() {
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
               {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
               {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceAllFutureInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
@@ -7276,7 +7459,7 @@ export default function App() {
       </div>
 
       {modal?.type === 'newTransaction' && (
-        <TransactionForm accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
+        <TransactionForm accounts={accounts} cards={cards} benefits={benefits} transactions={transactions} prefillDate={modal.date} prefillType={modal.txType} onSave={(f) => { addTransaction(f); setModal(null); }} onClose={() => setModal(null)} />
       )}
       {editingSearchResult && (
         <TransactionForm
