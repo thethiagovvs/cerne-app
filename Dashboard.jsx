@@ -28,6 +28,9 @@ import {
    Design tokens, dados de exemplo e componentes compartilhados
    ============================================================ */
 
+// Atualize esta linha a cada entrega: aparece no rodapé de Configurações.
+const APP_BUILD = '2026-10-31 · 19:10 · parte 2 + calculadora';
+
 const GLOBAL_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap');
 
@@ -6968,6 +6971,8 @@ function SettingsPage({ settings, onChangeSettings, onEditCategory, onReset, onC
           onClose={() => setShowConfirmRestore(false)}
         />
       )}
+      {/* Carimbo da versão: serve pra conferir, no próprio app, se o deploy novo realmente chegou. */}
+      <p className="text-[11px] text-center pt-2 pb-4" style={{ color: 'var(--text-soft)' }}>Cerne · versão {APP_BUILD}</p>
     </div>
   );
 }
