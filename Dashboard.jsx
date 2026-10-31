@@ -1584,7 +1584,7 @@ function Button({ children, variant = 'primary', size = 'md', icon: Icon, onClic
     : variant === 'danger' ? { backgroundColor: 'var(--expense)' }
     : {};
   return (
-    <button type={type} onClick={onClick} disabled={disabled} style={style} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} style={style} data-variant={variant} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
       {Icon && <Icon size={size === 'sm' || size === 'toolbar' ? 14 : 16} />}
       {children}
     </button>
@@ -1788,11 +1788,21 @@ function Modal({ title, onClose, children, wide }) {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(35,35,35,0.35)' }} onClick={onClose}>
+    <div data-modal className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(35,35,35,0.35)' }} onClick={onClose}>
       <div
-        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[88vh] overflow-y-auto rounded-2xl shadow-soft-lg animate-fade-up`}
+        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md sm:max-w-lg'} max-h-[88vh] overflow-y-auto rounded-2xl shadow-soft-lg animate-fade-up`}
         style={{ backgroundColor: 'var(--card)' }}
         onClick={(e) => e.stopPropagation()}
+        // Enter num campo de texto/número confirma o formulário (aciona o botão principal do
+        // rodapé), como em qualquer app de PC. Ignora checkbox, data e campos já com menu aberto.
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+          const t = e.target;
+          if (!t || t.tagName !== 'INPUT' || ['checkbox', 'radio', 'file', 'button', 'date'].includes(t.type)) return;
+          const btns = e.currentTarget.querySelectorAll('button[data-variant="primary"]:not([disabled]), button[data-variant="danger"]:not([disabled])');
+          const btn = btns[btns.length - 1];
+          if (btn) { e.preventDefault(); btn.click(); }
+        }}
       >
         <div className="flex items-center justify-between px-6 py-4 sticky top-0 z-10" style={{ backgroundColor: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
           <h3 className="font-display text-base font-semibold" style={{ color: 'var(--text)' }}>{title}</h3>
@@ -1856,9 +1866,13 @@ function FAB({ onClick, shrink }) {
   );
 }
 
+// pointer-events-none no container inteiro: o balão não intercepta nenhum clique — visualmente
+// ele pode estar por cima de um botão, mas o clique atravessa direto pro que está atrás, como se
+// o toast nem estivesse ali. Ele some sozinho depois de alguns segundos, ou na hora, assim que
+// a pessoa clicar em qualquer lugar da tela (ver o efeito que dispensa `toasts` em cliques).
 function ToastContainer({ toasts }) {
   return (
-    <div className="fixed left-4 right-4 sm:left-auto sm:right-6 z-[60] flex flex-col items-stretch sm:items-end gap-2 no-print" style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
+    <div className="fixed left-4 right-4 sm:left-auto sm:right-6 z-[60] flex flex-col items-stretch sm:items-end gap-2 no-print pointer-events-none" style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
       {toasts.map((t) => (
         <div key={t.id} className="animate-toast flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-soft-lg text-sm font-medium sm:max-w-sm" style={{ backgroundColor: t.type === 'error' ? 'var(--expense)' : 'var(--primary-dark)', color: '#fff' }}>
           {t.type === 'error' ? <AlertCircle size={16} className="shrink-0" /> : <Check size={16} className="shrink-0" />}
@@ -2163,7 +2177,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
         <div className="relative w-full max-w-sm min-w-0">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
           <input
-            value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos"
+            id="global-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamentos  ( / )"
             className="w-full pl-9 pr-9 h-11 box-border rounded-xl text-base sm:text-sm focus-ring" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--text)' }}
           />
           {search && (
@@ -2171,7 +2185,7 @@ function Header({ period, setPeriod, customRange, setCustomRange, search, setSea
               onClick={() => setSearch('')} title="Limpar busca"
               className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-black/10"
             >
-              <Trash2 size={14} color="var(--text-soft)" />
+              <X size={14} color="var(--text-soft)" />
             </button>
           )}
         </div>
@@ -2546,7 +2560,7 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
               const cat = CATEGORIES[tx.category] || CATEGORIES['Outros'];
               const inst = getInstallmentDisplay(tx);
               return (
-                <div key={tx.id} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.02]">
+                <div key={tx.id} onClick={() => onEdit(tx)} className="group flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-black/[0.03] cursor-pointer">
                   <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -2562,8 +2576,8 @@ function RecentTransactions({ transactions, accounts, onEdit, onDelete, onSeeAll
                   <span className="tabular-nums text-sm font-medium shrink-0" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>
                     {tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}
                   </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => onEdit(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--primary)" /></button>
                     <button onClick={() => setConfirmDeleteTx(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                   </div>
                 </div>
@@ -2666,8 +2680,8 @@ function GoalCard({ goal, onAddFunds, onEdit, onDelete, onCompleted, compact }) 
         </div>
         {!compact && (
           <div className="flex items-center gap-1 shrink-0">
-            {onEdit && <button onClick={() => onEdit(goal)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>}
-            <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+            {onEdit && <button onClick={() => onEdit(goal)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--primary)" /></button>}
+            <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
           </div>
         )}
       </div>
@@ -3075,8 +3089,8 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
           <p className="text-xs opacity-70">{card.brand}</p>
         </div>
         {onEdit && !isHistoricalView && (
-          <button onClick={() => setShowEditForm(true)} className="p-2 rounded-lg hover:bg-white/10" title="Editar cartão">
-            <Pencil size={16} className="opacity-80" />
+          <button onClick={() => setShowEditForm(true)} className="p-2 sm:px-2.5 sm:py-1.5 rounded-lg bg-white/0 hover:bg-white/15 transition-colors flex items-center gap-1.5" title="Editar cartão">
+            <Pencil size={16} className="opacity-80" /><span className="hidden sm:inline text-xs font-medium opacity-90">Editar</span>
           </button>
         )}
       </div>
@@ -4008,6 +4022,34 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     setSelectedIds([]);
   }
 
+  // ---- Seleção no PC: checkbox em cada linha (sempre visível), checkbox de "todos" no cabeçalho,
+  // Ctrl/Cmd/Shift + clique na linha, e Esc pra limpar. Clique simples na linha abre a edição —
+  // a não ser que já exista uma seleção em andamento, aí o clique passa a marcar/desmarcar.
+  function toggleSelectDesktop(id) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    setSelectedIds(next);
+    setSelectionMode(next.length > 0);
+  }
+  function toggleAllDesktop(rows) {
+    const ids = rows.map((r) => r.id);
+    const allOn = ids.length > 0 && ids.every((id) => selectedIds.includes(id));
+    const next = allOn ? selectedIds.filter((id) => !ids.includes(id)) : [...new Set([...selectedIds, ...ids])];
+    setSelectedIds(next);
+    setSelectionMode(next.length > 0);
+  }
+  function handleRowClickDesktop(e, row, openEdit) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.length > 0) { toggleSelectDesktop(row.id); return; }
+    if (openEdit) openEdit(row);
+  }
+  useEffect(() => {
+    if (selectedIds.length === 0) return;
+    function onKey(e) { if (e.key === 'Escape') exitSelectionMode(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds.length]);
+
+
   const filtered = useMemo(() => transactions.filter((t) => {
     if (!showCardTx && t.cardId) return false;
     const matchesType = typeFilter === 'all' || t.type === typeFilter;
@@ -4085,8 +4127,16 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     onImport(rows, meta);
   }
 
+  // Exporta SEMPRE o histórico completo de lançamentos — não o que está filtrado/pesquisado na
+  // tela, nem só a página atual (8 por página). Antes usava `sorted`, que já respeitava busca,
+  // filtros e o toggle "mostrar cartão aqui" (escondido por padrão), então baixar o CSV/Excel sem
+  // mexer em nada acabava excluindo as compras no cartão silenciosamente — surpreendia quem só
+  // queria "baixar tudo". Os botões de exportar agora ficam fora do fluxo dos filtros de propósito.
+  function allTransactionsForExport() {
+    return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
   function exportCSV() {
-    const rows = sorted.map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
+    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
     const csv = Papa.unparse(rows);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -4095,7 +4145,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     URL.revokeObjectURL(url);
   }
   function exportExcel() {
-    const rows = sorted.map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
+    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Transações');
@@ -4238,7 +4288,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
         )}
 
         {pageData.length > 0 && (
-          <div className={`flex items-center gap-2 mt-3 no-print${selectionMode ? ' justify-end' : ' justify-center'}`}>
+          <div className={`sm:hidden flex items-center gap-2 mt-3 no-print${selectionMode ? ' justify-end' : ' justify-center'}`}>
             {selectionMode ? (
               <>
                 <span className="text-xs mr-auto" style={{ color: 'var(--text-soft)' }}>{selectedIds.length} selecionado(s)</span>
@@ -4311,30 +4361,48 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
               {!selectionMode && <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>}
             </div>
 
-            {/* Desktop/tablet: tabela completa */}
-            <div className="hidden sm:block overflow-x-auto mt-4 -mx-1">
-              <table className="w-full min-w-[720px]">
+            {/* Desktop/tablet: tabela completa. Checkbox sempre visível, clique na linha edita,
+                Ctrl/Shift + clique seleciona vários; com seleção ativa, a barra de ações aparece
+                logo acima da tabela (não flutua sobre o conteúdo). */}
+            <div className="hidden sm:block mt-4">
+              {selectedIds.length > 0 && (
+                <SelectionActionBar
+                  variant="inline"
+                  count={selectedIds.length}
+                  total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
+                  onClear={exitSelectionMode}
+                  onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
+                  onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
+                  onChangeDate={onBulkChangeDate ? () => setBulkDateModal(true) : undefined}
+                  onChangePayment={onBulkChangePayment ? () => setBulkPaymentModal(true) : undefined}
+                />
+              )}
+              <div className="overflow-x-auto -mx-1">
+              <table className="w-full min-w-[760px]">
                 <thead>
                   <tr className="text-left text-xs" style={{ color: 'var(--text-soft)' }}>
-                    {selectionMode && <th className="pb-2 pr-2 w-8"></th>}
+                    <th className="pb-2 pl-1 pr-2 w-8 no-print">
+                      <input type="checkbox" aria-label="Selecionar todos desta página" title="Selecionar todos desta página" checked={pageData.length > 0 && pageData.every((t) => selectedIds.includes(t.id))} onChange={() => toggleAllDesktop(pageData)} className="w-4 h-4 focus-ring cursor-pointer" style={{ accentColor: 'var(--primary)' }} />
+                    </th>
                     {sortableColumns.map((c) => (
-                      <th key={c.key} className={`pb-2 pr-3 font-medium cursor-pointer select-none${c.center ? ' text-center' : ''}`} onClick={() => handleSort(c.key)}>
-                        <span className={`flex items-center gap-1${c.center ? ' justify-center' : ''}`}>{c.label} {sortConfig.key === c.key && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
+                      <th key={c.key} className={`pb-2 pr-3 font-medium cursor-pointer select-none${c.center ? ' text-center' : ''}${c.key === 'amount' ? ' text-right' : ''}`} onClick={() => handleSort(c.key)}>
+                        <span className={`flex items-center gap-1${c.center ? ' justify-center' : ''}${c.key === 'amount' ? ' justify-end' : ''}`}>{c.label} {sortConfig.key === c.key && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
                       </th>
                     ))}
                     <th className="pb-2 pr-3 font-medium">Conta</th>
                     <th className="pb-2 pr-3 font-medium text-center">Pagamento</th>
-                    <th className="pb-2 pr-1 font-medium no-print"></th>
+                    <th className="pb-2 pr-1 font-medium no-print w-[104px]"></th>
                   </tr>
                 </thead>
                 <tbody style={{ borderTop: '1px solid var(--border)' }}>
                   {pageData.map((tx) => {
                     const inst = getInstallmentDisplay(tx);
+                    const isSel = selectedIds.includes(tx.id);
                     return (
-                    <tr key={tx.id} onClick={selectionMode ? () => toggleSelect(tx.id) : undefined} className="text-sm hover:bg-black/[0.02]" style={selectionMode ? { backgroundColor: selectedIds.includes(tx.id) ? 'var(--primary-soft)' : undefined, cursor: 'pointer' } : undefined}>
-                      {selectionMode && (
-                        <td className="py-3 pr-2"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 focus-ring" style={{ accentColor: 'var(--primary)' }} /></td>
-                      )}
+                    <tr key={tx.id} onClick={(e) => handleRowClickDesktop(e, tx, setEditing)} className="text-sm hover:bg-black/[0.03] cursor-pointer" style={isSel ? { backgroundColor: 'var(--primary-soft)' } : { borderBottom: '1px solid var(--border)' }}>
+                      <td className="py-3 pl-1 pr-2 no-print" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Selecionar ${tx.description}`} checked={isSel} onChange={() => toggleSelectDesktop(tx.id)} className="w-4 h-4 focus-ring cursor-pointer" style={{ accentColor: 'var(--primary)' }} />
+                      </td>
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDate(tx.date)}</td>
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}>
                         {inst.desc}
@@ -4345,26 +4413,26 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
                         )}
                       </td>
                       <td className="py-3 pr-3 text-center"><CategoryBadge category={tx.category} /></td>
-                      <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</td>
+                      <td className="py-3 pr-3 tabular-nums font-medium whitespace-nowrap text-right" style={{ color: tx.type === 'receita' ? 'var(--income)' : 'var(--expense)' }}>{tx.type === 'receita' ? '+' : '-'} {formatBRL(tx.amount)}</td>
                       <td className="py-3 pr-3 text-center"><StatusBadge status={tx.status} type={tx.type} /></td>
                       <td className="py-3 pr-3 whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{accounts.find((a) => a.id === tx.account)?.bank || 'Conta removida'}</td>
                       <td className="py-3 pr-3 whitespace-nowrap text-center" style={{ color: 'var(--text-soft)' }}>{tx.paymentMethod}</td>
-                      <td className="py-3 pr-1 no-print">
-                        {!selectionMode && (
-                          <div className="flex items-center gap-1">
-                            {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
-                              <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
-                            )}
-                            <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
-                            <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
-                          </div>
-                        )}
+                      <td className="py-3 pr-1 no-print" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {onMarkPaid && tx.status === 'Pendente' && !tx.cardId && (
+                            <button onClick={() => setConfirmMarkPaid(tx)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                          )}
+                          <button onClick={() => setEditing(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Editar lançamento"><Pencil size={14} color="var(--primary)" /></button>
+                          <button onClick={() => setConfirmDeleteRow(tx)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir lançamento"><Trash2 size={14} color="var(--expense)" /></button>
+                        </div>
                       </td>
                     </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
+              <p className="text-[11px] text-center mt-3 no-print" style={{ color: 'var(--text-soft)' }}>Clique na linha para editar · Ctrl/Shift + clique para selecionar vários · Esc limpa a seleção</p>
             </div>
           </>
         )}
@@ -4428,11 +4496,12 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
    PÁGINA: CONTAS BANCÁRIAS + CAIXINHAS
    ============================================================ */
 
-function AccountForm({ onSave, onClose }) {
-  const [form, setForm] = useState({ bank: '', type: 'Conta Corrente', balance: 0, alertThreshold: 0 });
+function AccountForm({ initial, onSave, onClose }) {
+  const [form, setForm] = useState(initial ? { ...initial } : { bank: '', type: 'Conta Corrente', balance: 0, alertThreshold: 0 });
   const [error, setError] = useState('');
+  const isEditing = !!initial;
   return (
-    <Modal title="Nova conta" onClose={onClose}>
+    <Modal title={isEditing ? 'Editar conta' : 'Nova conta'} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <FieldLabel error={error}>Banco</FieldLabel>
@@ -4445,6 +4514,7 @@ function AccountForm({ onSave, onClose }) {
             <option>Poupança</option>
           </Select>
         </div>
+        {!isEditing && (<>
         <div>
           <FieldLabel>Saldo inicial</FieldLabel>
           <SignedCurrencyInput value={form.balance} onChange={(v) => setForm({ ...form, balance: v })} />
@@ -4455,9 +4525,11 @@ function AccountForm({ onSave, onClose }) {
           <CurrencyInput value={form.alertThreshold} onChange={(v) => setForm({ ...form, alertThreshold: v })} />
           <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>Se o saldo cair até esse valor, a conta é sinalizada como zona de risco. Deixe 0 para não usar.</p>
         </div>
+        </>)}
+        {isEditing && <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Saldo e alerta de saldo baixo são ajustados direto no card da conta.</p>}
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!form.bank.trim()) { setError('Informe o nome do banco'); return; } onSave(form); }}>Adicionar conta</Button>
+          <Button onClick={() => { if (!form.bank.trim()) { setError('Informe o nome do banco'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar conta'}</Button>
         </div>
       </div>
     </Modal>
@@ -4541,16 +4613,18 @@ function BalanceHistoryLog({ history }) {
   );
 }
 
-function CaixinhaForm({ accounts, onSave, onClose }) {
-  const [form, setForm] = useState({ name: '', balance: 0, accountId: accounts[0]?.id || '' });
+function CaixinhaForm({ initial, accounts, onSave, onClose }) {
+  const [form, setForm] = useState(initial ? { ...initial } : { name: '', balance: 0, accountId: accounts[0]?.id || '' });
   const [error, setError] = useState('');
+  const isEditing = !!initial;
   return (
-    <Modal title="Nova caixinha" onClose={onClose}>
+    <Modal title={isEditing ? 'Editar caixinha' : 'Nova caixinha'} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <FieldLabel error={error}>Nome da caixinha</FieldLabel>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Reserva para o Natal" />
         </div>
+        {!isEditing ? (<>
         <div>
           <FieldLabel>Valor inicial</FieldLabel>
           <CurrencyInput value={form.balance} onChange={(v) => setForm({ ...form, balance: v })} />
@@ -4561,16 +4635,17 @@ function CaixinhaForm({ accounts, onSave, onClose }) {
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} ({a.type})</option>)}
           </Select>
         </div>
+        </>) : <p className="text-xs" style={{ color: 'var(--text-soft)' }}>O valor é atualizado no próprio card da caixinha, pra manter o histórico e o saldo da conta certos.</p>}
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>Criar caixinha</Button>
+          <Button onClick={() => { if (!form.name.trim()) { setError('Informe um nome'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Criar caixinha'}</Button>
         </div>
       </div>
     </Modal>
   );
 }
 
-function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
+function CaixinhaCard({ caixinha, accountName, onUpdateValue, onEdit, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const history = caixinha.history || [];
@@ -4582,7 +4657,8 @@ function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{caixinha.name}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{accountName}</p>
         </div>
-        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+        {onEdit && <button onClick={() => onEdit(caixinha)} className="p-2 rounded-lg hover:bg-black/5" title="Editar caixinha"><Pencil size={14} color="var(--primary)" /></button>}
+        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
       </div>
       <p className="font-display text-lg font-bold tabular-nums mb-2" style={{ color: 'var(--text)' }}>{formatBRL(caixinha.balance)}</p>
       <UpdateValueControl currentValue={caixinha.balance} onUpdate={(value, note) => onUpdateValue(caixinha, value, note)} />
@@ -4606,7 +4682,7 @@ function CaixinhaCard({ caixinha, accountName, onUpdateValue, onDelete }) {
   );
 }
 
-function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }) {
+function AccountCard({ acc, onEdit, onDelete, onSetThreshold, onSetBalance, usageCount }) {
   const Icon = ACCOUNTS_ICONS[acc.type] || Wallet;
   const [editingThreshold, setEditingThreshold] = useState(false);
   const [thresholdValue, setThresholdValue] = useState(acc.alertThreshold || 0);
@@ -4623,12 +4699,13 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{acc.bank}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{acc.type}</p>
         </div>
-        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+        {onEdit && <button onClick={() => onEdit(acc)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar conta"><Pencil size={14} color="var(--primary)" /></button>}
+        <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
       </div>
       {!editingBalance ? (
         <div className="flex items-center gap-1.5 mt-3 min-w-0">
           <p className="font-display text-xl font-bold tabular-nums truncate" style={{ color: atRisk ? 'var(--expense)' : 'var(--text)' }}>{formatBRL(acc.balance)}</p>
-          <button onClick={() => { setBalanceValue(acc.balance); setEditingBalance(true); }} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar saldo"><Pencil size={12} color="var(--text-soft)" /></button>
+          <button onClick={() => { setBalanceValue(acc.balance); setEditingBalance(true); }} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar saldo"><Pencil size={12} color="var(--primary)" /></button>
         </div>
       ) : (
         <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -4671,7 +4748,9 @@ function AccountCard({ acc, onDelete, onSetThreshold, onSetBalance, usageCount }
   );
 }
 
-function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onDeleteCaixinha, onUpdateCaixinhaValue }) {
+function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccount, onEditAccount, onDeleteAccount, onSetAccountThreshold, onSetAccountBalance, onAddCaixinha, onEditCaixinha, onDeleteCaixinha, onUpdateCaixinhaValue }) {
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingCaixinha, setEditingCaixinha] = useState(null);
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [showCaixinhaForm, setShowCaixinhaForm] = useState(false);
   const total = accounts.reduce((s, a) => s + a.balance, 0);
@@ -4691,7 +4770,7 @@ function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccoun
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {accounts.map((acc) => {
             const usageCount = transactions.filter((t) => t.account === acc.id).length + caixinhas.filter((c) => c.accountId === acc.id).length;
-            return <AccountCard key={acc.id} acc={acc} onDelete={onDeleteAccount} onSetThreshold={onSetAccountThreshold} onSetBalance={onSetAccountBalance} usageCount={usageCount} />;
+            return <AccountCard key={acc.id} acc={acc} onEdit={onEditAccount ? setEditingAccount : undefined} onDelete={onDeleteAccount} onSetThreshold={onSetAccountThreshold} onSetBalance={onSetAccountBalance} usageCount={usageCount} />;
           })}
         </div>
       </div>
@@ -4706,7 +4785,7 @@ function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccoun
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {caixinhas.map((cx) => (
-                <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onUpdateValue={onUpdateCaixinhaValue} onDelete={onDeleteCaixinha} />
+                <CaixinhaCard key={cx.id} caixinha={cx} accountName={accounts.find((a) => a.id === cx.accountId)?.bank || ''} onUpdateValue={onUpdateCaixinhaValue} onEdit={onEditCaixinha ? setEditingCaixinha : undefined} onDelete={onDeleteCaixinha} />
               ))}
             </div>
           )}
@@ -4715,6 +4794,8 @@ function AccountsPage({ accounts, caixinhas, transactions, settings, onAddAccoun
 
       {showAccountForm && <AccountForm onSave={(f) => { onAddAccount(f); setShowAccountForm(false); }} onClose={() => setShowAccountForm(false)} />}
       {showCaixinhaForm && <CaixinhaForm accounts={accounts} onSave={(f) => { onAddCaixinha(f); setShowCaixinhaForm(false); }} onClose={() => setShowCaixinhaForm(false)} />}
+      {editingAccount && <AccountForm initial={editingAccount} onSave={(f) => { onEditAccount(f); setEditingAccount(null); }} onClose={() => setEditingAccount(null)} />}
+      {editingCaixinha && <CaixinhaForm initial={editingCaixinha} accounts={accounts} onSave={(f) => { onEditCaixinha(f); setEditingCaixinha(null); }} onClose={() => setEditingCaixinha(null)} />}
     </div>
   );
 }
@@ -4799,23 +4880,26 @@ function CardForm({ initial, accounts, hasOutstandingBalance = false, onSave, on
 
 /* ---------- Vale-benefícios (ex: Flash — alimentação + transporte no mesmo cartão) ---------- */
 
-function BenefitForm({ onSave, onClose }) {
-  const [form, setForm] = useState({ provider: 'Flash', foodBalance: 0, mobilityBalance: 0 });
+function BenefitForm({ initial, onSave, onClose }) {
+  const [form, setForm] = useState(initial ? { ...initial } : { provider: 'Flash', foodBalance: 0, mobilityBalance: 0 });
   const [error, setError] = useState('');
+  const isEditing = !!initial;
   return (
-    <Modal title="Novo vale-benefícios" onClose={onClose}>
+    <Modal title={isEditing ? 'Editar vale-benefícios' : 'Novo vale-benefícios'} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <FieldLabel error={error}>Fornecedor</FieldLabel>
           <input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Flash" />
         </div>
+        {!isEditing ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><FieldLabel>Saldo alimentação</FieldLabel><CurrencyInput value={form.foodBalance} onChange={(v) => setForm({ ...form, foodBalance: v })} /></div>
           <div><FieldLabel>Saldo transporte</FieldLabel><CurrencyInput value={form.mobilityBalance} onChange={(v) => setForm({ ...form, mobilityBalance: v })} /></div>
         </div>
+        ) : <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Os saldos são atualizados nos próprios cards de alimentação e transporte, pra manter o histórico.</p>}
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { if (!form.provider.trim()) { setError('Informe o fornecedor'); return; } onSave(form); }}>Adicionar</Button>
+          <Button onClick={() => { if (!form.provider.trim()) { setError('Informe o fornecedor'); return; } onSave(form); }}>{isEditing ? 'Salvar' : 'Adicionar'}</Button>
         </div>
       </div>
     </Modal>
@@ -4841,7 +4925,7 @@ function BenefitBalance({ label, icon: Icon, value, history, onUpdate }) {
   );
 }
 
-function BenefitCard({ benefit, onUpdate, onDelete }) {
+function BenefitCard({ benefit, onUpdate, onEdit, onDelete }) {
   return (
     <Card padding="p-5">
       <div className="flex items-start gap-3 mb-3">
@@ -4850,7 +4934,8 @@ function BenefitCard({ benefit, onUpdate, onDelete }) {
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{benefit.provider}</p>
           <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Vale-benefícios</p>
         </div>
-        <button onClick={() => onDelete(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--text-soft)" /></button>
+        {onEdit && <button onClick={() => onEdit(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Editar vale-benefícios"><Pencil size={14} color="var(--primary)" /></button>}
+        <button onClick={() => onDelete(benefit)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
       </div>
       <div className="grid grid-cols-1 gap-3">
         <BenefitBalance label="Alimentação" icon={Utensils} value={benefit.foodBalance} history={benefit.foodHistory} onUpdate={(value, note) => onUpdate(benefit, 'foodBalance', value, note)} />
@@ -4880,35 +4965,49 @@ function MonthNavigator({ label, monthOffset, onPrev, onNext, onToday }) {
 // Barra de ações flutuante da seleção múltipla — some acima do FAB (que fica no canto), pra não
 // se sobrepor a ele. As ações em si (o que cada botão faz) ficam a cargo de quem usa este
 // componente, aqui é só a casca visual + confirmação de excluir (a única ação destrutiva).
-function SelectionActionBar({ count, total, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment }) {
+function SelectionActionBar({ count, total, onClear, onDelete, onMoveNext, onChangeDate, onChangePayment, variant = 'floating' }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 'floating' (celular): balão fixo na base da tela, botões empilhados (ícone em cima do texto).
+  // 'inline' (PC): faixa dentro do fluxo da página, logo acima da tabela — não cobre conteúdo,
+  // paginação nem os botões de cada linha. O mesmo componente atende os dois pra que a confirmação
+  // de exclusão e as ações fiquem num lugar só.
+  const inline = variant === 'inline';
+  const btn = inline
+    ? 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-white/10 shrink-0'
+    : 'flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0';
+  const label = inline ? '' : 'text-[10px] font-medium leading-none';
   return (
     <>
-      <div className="fixed z-30 left-4 right-4 bottom-24 lg:left-auto lg:right-8 lg:w-auto rounded-2xl shadow-soft-lg flex items-center gap-1 p-2 animate-fade-up" style={{ backgroundColor: 'var(--primary)', color: '#fff' }}>
-        <button onClick={onClear} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-          <X size={16} /><span className="text-[10px] font-medium leading-none">Fechar</span>
+      <div
+        className={inline
+          ? 'hidden sm:flex items-center gap-1 px-3 py-2 mb-3 rounded-xl sticky top-0 z-10 no-print'
+          : 'fixed z-30 left-4 right-4 bottom-24 sm:hidden rounded-2xl shadow-soft-lg flex items-center gap-1 p-2 animate-fade-up'}
+        style={{ backgroundColor: 'var(--primary)', color: '#fff' }}
+      >
+        <button onClick={onClear} className={btn} title="Limpar seleção (Esc)">
+          <X size={16} /><span className={label}>{inline ? 'Limpar' : 'Fechar'}</span>
         </button>
-        <span className="text-sm font-semibold pl-2 pr-1 shrink-0">{count}</span>
+        <span className="text-sm font-semibold pl-2 pr-1 shrink-0">{count} selecionado{count === 1 ? '' : 's'}</span>
         {total != null && <span className="text-xs tabular-nums pr-2 shrink-0 opacity-90">· {formatBRL(total)}</span>}
         <div className="flex-1 flex items-center justify-end gap-0.5 overflow-x-auto">
           {onChangePayment && (
-            <button onClick={onChangePayment} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-              <CreditCard size={16} /><span className="text-[10px] font-medium leading-none">Pagamento</span>
+            <button onClick={onChangePayment} className={btn}>
+              <CreditCard size={16} /><span className={label}>Pagamento</span>
             </button>
           )}
           {onChangeDate && (
-            <button onClick={onChangeDate} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-              <CalendarIcon size={16} /><span className="text-[10px] font-medium leading-none">Data</span>
+            <button onClick={onChangeDate} className={btn}>
+              <CalendarIcon size={16} /><span className={label}>Data</span>
             </button>
           )}
           {onMoveNext && (
-            <button onClick={onMoveNext} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-              <ArrowRightCircle size={16} /><span className="text-[10px] font-medium leading-none">Mover</span>
+            <button onClick={onMoveNext} className={btn}>
+              <ArrowRightCircle size={16} /><span className={label}>Mover</span>
             </button>
           )}
           {onDelete && (
-            <button onClick={() => setConfirmDelete(true)} className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl hover:bg-white/10 shrink-0">
-              <Trash2 size={16} /><span className="text-[10px] font-medium leading-none">Excluir</span>
+            <button onClick={() => setConfirmDelete(true)} className={btn}>
+              <Trash2 size={16} /><span className={label}>Excluir</span>
             </button>
           )}
         </div>
@@ -5050,6 +5149,34 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
     setSelectedIds([]);
   }
 
+  // ---- Seleção no PC: checkbox em cada linha (sempre visível), checkbox de "todos" no cabeçalho,
+  // Ctrl/Cmd/Shift + clique na linha, e Esc pra limpar. Clique simples na linha abre a edição —
+  // a não ser que já exista uma seleção em andamento, aí o clique passa a marcar/desmarcar.
+  function toggleSelectDesktop(id) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    setSelectedIds(next);
+    setSelectionMode(next.length > 0);
+  }
+  function toggleAllDesktop(rows) {
+    const ids = rows.map((r) => r.id);
+    const allOn = ids.length > 0 && ids.every((id) => selectedIds.includes(id));
+    const next = allOn ? selectedIds.filter((id) => !ids.includes(id)) : [...new Set([...selectedIds, ...ids])];
+    setSelectedIds(next);
+    setSelectionMode(next.length > 0);
+  }
+  function handleRowClickDesktop(e, row, openEdit) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.length > 0) { toggleSelectDesktop(row.id); return; }
+    if (openEdit) openEdit(row);
+  }
+  useEffect(() => {
+    if (selectedIds.length === 0) return;
+    function onKey(e) { if (e.key === 'Escape') exitSelectionMode(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds.length]);
+
+
   function handleImportFile(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -5156,7 +5283,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       </div>
 
       {cards.length > 0 && (
-        <div className="space-y-2 sm:max-w-xl">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {visibleCards.map((c) => (
             <CardInvoiceRow
               key={c.id} card={c} transactions={transactions}
@@ -5168,7 +5295,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
         </div>
       )}
 
-      <div className="flex flex-nowrap items-center gap-2 sm:max-w-xl">
+      <div className="flex flex-nowrap items-center gap-2">
         <input type="file" accept=".csv,.ofx" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
         <div className="relative flex-1 min-w-0">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" color="var(--text-soft)" />
@@ -5254,7 +5381,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
           </div>
         </div>
         {list.length > 0 && (
-          <div className={`flex items-center gap-3 mb-3${selectionMode ? ' justify-end' : ' justify-center'}`}>
+          <div className={`sm:hidden flex items-center gap-3 mb-3${selectionMode ? ' justify-end' : ' justify-center'}`}>
             {selectionMode ? (
               <>
                 <span className="text-xs mr-auto" style={{ color: 'var(--text-soft)' }}>{selectedIds.length} selecionado(s)</span>
@@ -5328,51 +5455,88 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
               {!selectionMode && <p className="text-[11px] text-center pt-1" style={{ color: 'var(--text-soft)' }}>Arraste um lançamento pra esquerda para editar ou excluir</p>}
             </div>
 
-            {/* Desktop/tablet: linha única, como antes. */}
-            <div className="hidden sm:block space-y-1">
-              {list.map((t) => {
-                const cat = t.isInvoicePayment ? { icon: Banknote, color: 'var(--income)', soft: 'var(--income-soft)' } : (CATEGORIES[t.category] || CATEGORIES['Outros']);
-                const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
-                const acc = !card ? accounts.find((a) => a.id === t.account) : null;
-                const inst = getInstallmentDisplay(t);
-                return (
-                  <div
-                    key={t.id}
-                    onClick={selectionMode ? () => toggleSelect(t.id) : undefined}
-                    className={`flex items-center gap-3 py-2.5 px-1 hover:bg-black/[0.02] rounded-lg${justToggledId === t.id ? ' animate-press-select' : ''}`}
-                    style={selectionMode && selectedIds.includes(t.id) ? { backgroundColor: 'var(--primary-soft)', cursor: 'pointer' } : selectionMode ? { cursor: 'pointer' } : undefined}
-                  >
-                    {selectionMode ? (
-                      <div className="rounded-xl flex items-center justify-center shrink-0 transition-colors" style={{ width: 36, height: 36, backgroundColor: selectedIds.includes(t.id) ? 'var(--primary)' : 'var(--bg)', border: selectedIds.includes(t.id) ? 'none' : '2px solid var(--border)' }}>
-                        {selectedIds.includes(t.id) && <Check size={18} color="#fff" />}
+            {/* Desktop/tablet: linhas alinhadas em colunas (mesma grade no cabeçalho e em cada linha),
+                checkbox sempre visível, clique na linha edita, Ctrl/Shift + clique seleciona vários. */}
+            {(() => {
+              const showStatus = subview !== 'fatura';
+              const cols = showStatus
+                ? '28px minmax(0,1.7fr) 92px minmax(0,1fr) 72px 108px 112px 104px'
+                : '28px minmax(0,1.7fr) 92px minmax(0,1fr) 72px 112px 104px';
+              const allOn = list.length > 0 && list.every((t) => selectedIds.includes(t.id));
+              return (
+                <div className="hidden sm:block">
+                  {selectedIds.length > 0 && (
+                    <SelectionActionBar
+                      variant="inline"
+                      count={selectedIds.length}
+                      total={transactions.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.amount, 0)}
+                      onClear={exitSelectionMode}
+                      onDelete={onBulkDelete ? () => { onBulkDelete(selectedIds); exitSelectionMode(); } : undefined}
+                      onMoveNext={onBulkMoveNext ? () => setBulkMoveModal(true) : undefined}
+                      onChangeDate={onBulkChangeDate ? () => setBulkDateModal(true) : undefined}
+                      onChangePayment={onBulkChangePayment ? () => setBulkPaymentModal(true) : undefined}
+                    />
+                  )}
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[760px]">
+                      <div className="grid items-center gap-3 px-2 pb-2 text-xs font-medium" style={{ gridTemplateColumns: cols, color: 'var(--text-soft)', borderBottom: '1px solid var(--border)' }}>
+                        <input type="checkbox" aria-label="Selecionar todos" title="Selecionar todos" checked={allOn} onChange={() => toggleAllDesktop(list)} className="w-4 h-4 focus-ring cursor-pointer" style={{ accentColor: 'var(--primary)' }} />
+                        <span>Descrição</span>
+                        <span>Data</span>
+                        <span>Cartão / conta</span>
+                        <span>Tipo</span>
+                        {showStatus && <span>Status</span>}
+                        <span className="text-right">Valor</span>
+                        <span />
                       </div>
-                    ) : (
-                      <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
-                        {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
-                      </div>
-                      <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>
-                        {formatDateShortYear(t.date)} · {card ? card.bank : (acc ? acc.bank : 'Conta removida')} · {card ? 'Crédito' : 'Débito'}
-                      </p>
+                      {list.map((t) => {
+                        const cat = t.isInvoicePayment ? { icon: Banknote, color: 'var(--income)', soft: 'var(--income-soft)' } : (CATEGORIES[t.category] || CATEGORIES['Outros']);
+                        const card = t.cardId ? cards.find((c) => c.id === t.cardId) : null;
+                        const acc = !card ? accounts.find((a) => a.id === t.account) : null;
+                        const inst = getInstallmentDisplay(t);
+                        const isSel = selectedIds.includes(t.id);
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={(e) => handleRowClickDesktop(e, t, onEditTransaction ? setEditingTx : undefined)}
+                            className="grid items-center gap-3 px-2 py-2.5 cursor-pointer hover:bg-black/[0.03]"
+                            style={{ gridTemplateColumns: cols, backgroundColor: isSel ? 'var(--primary-soft)' : undefined, borderBottom: '1px solid var(--border)' }}
+                          >
+                            <span onClick={(e) => e.stopPropagation()} className="flex items-center">
+                              <input type="checkbox" aria-label={`Selecionar ${t.description}`} checked={isSel} onChange={() => toggleSelectDesktop(t.id)} className="w-4 h-4 focus-ring cursor-pointer" style={{ accentColor: 'var(--primary)' }} />
+                            </span>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={32} />
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <p className="text-sm font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>{inst.desc}</p>
+                                {inst.count && <span className="shrink-0 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary-dark)' }}>{inst.index}/{inst.count}</span>}
+                              </div>
+                            </div>
+                            <span className="text-sm whitespace-nowrap" style={{ color: 'var(--text-soft)' }}>{formatDateShortYear(t.date)}</span>
+                            <span className="text-sm truncate" style={{ color: 'var(--text-soft)' }}>{card ? card.bank : (acc ? acc.bank : 'Conta removida')}</span>
+                            <span className="text-sm" style={{ color: 'var(--text-soft)' }}>{card ? 'Crédito' : 'Débito'}</span>
+                            {showStatus && <span><StatusBadge status={t.status} type={t.type} /></span>}
+                            <span className="text-sm font-medium tabular-nums text-right whitespace-nowrap" style={{ color: t.isInvoicePayment ? 'var(--income)' : 'var(--expense)' }}>{t.isInvoicePayment ? '- ' : ''}{formatBRL(t.amount)}</span>
+                            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                              {onMarkPaid && t.status === 'Pendente' && !t.cardId && (
+                                <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
+                              )}
+                              {onEditTransaction && (
+                                <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5" title="Editar lançamento"><Pencil size={14} color="var(--primary)" /></button>
+                              )}
+                              {onDeleteTransaction && (
+                                <button onClick={() => setConfirmDeleteRow(t)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir lançamento"><Trash2 size={14} color="var(--expense)" /></button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    {subview !== 'fatura' && <StatusBadge status={t.status} type={t.type} />}
-                    {!selectionMode && onMarkPaid && t.status === 'Pendente' && !t.cardId && (
-                      <button onClick={() => setConfirmMarkPaid(t)} title="Marcar como pago" className="p-2 rounded-lg hover:bg-black/5"><Check size={14} color="var(--income)" /></button>
-                    )}
-                    <span className="text-sm font-medium tabular-nums shrink-0" style={{ color: t.isInvoicePayment ? 'var(--income)' : 'var(--expense)' }}>{t.isInvoicePayment ? '- ' : ''}{formatBRL(t.amount)}</span>
-                    {!selectionMode && onEditTransaction && (
-                      <button onClick={() => setEditingTx(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar lançamento"><Pencil size={14} color="var(--text-soft)" /></button>
-                    )}
-                    {!selectionMode && onDeleteTransaction && (
-                      <button onClick={() => setConfirmDeleteRow(t)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir lançamento"><Trash2 size={14} color="var(--expense)" /></button>
-                    )}
                   </div>
-                );
-              })}
-            </div>
+                  <p className="text-[11px] text-center mt-3 no-print" style={{ color: 'var(--text-soft)' }}>Clique na linha para editar · Ctrl/Shift + clique para selecionar vários · Esc limpa a seleção</p>
+                </div>
+              );
+            })()}
           </>
         )}
       </Card>
@@ -5426,9 +5590,10 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
   );
 }
 
-function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
+function CardsPage({ cards, transactions, accounts, recurring, settings, cardGradients, onAdd, onEdit, onDelete, onPayInvoice, onAdvanceInstallments, benefits, onAddBenefit, onEditBenefit, onDeleteBenefit, onUpdateBenefit, view = 'cartoes', onChangeView, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
   const [showForm, setShowForm] = useState(false);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
+  const [editingBenefit, setEditingBenefit] = useState(null);
   const [confirmDeleteBenefit, setConfirmDeleteBenefit] = useState(null);
   const [monthOffset, setMonthOffset] = useState(0);
   const refDate = useMemo(() => {
@@ -5488,7 +5653,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   {benefits.map((b) => (
-                    <BenefitCard key={b.id} benefit={b} onUpdate={onUpdateBenefit} onDelete={() => setConfirmDeleteBenefit(b)} />
+                    <BenefitCard key={b.id} benefit={b} onUpdate={onUpdateBenefit} onEdit={onEditBenefit ? setEditingBenefit : undefined} onDelete={() => setConfirmDeleteBenefit(b)} />
                   ))}
                 </div>
               )}
@@ -5497,6 +5662,7 @@ function CardsPage({ cards, transactions, accounts, recurring, settings, cardGra
 
           {showForm && <CardForm accounts={accounts} onSave={(f) => { onAdd(f); setShowForm(false); }} onClose={() => setShowForm(false)} />}
           {showBenefitForm && <BenefitForm onSave={(f) => { onAddBenefit(f); setShowBenefitForm(false); }} onClose={() => setShowBenefitForm(false)} />}
+          {editingBenefit && <BenefitForm initial={editingBenefit} onSave={(f) => { onEditBenefit(f); setEditingBenefit(null); }} onClose={() => setEditingBenefit(null)} />}
           {confirmDeleteBenefit && (
             <ConfirmModal
               title="Excluir vale-benefícios"
@@ -5671,14 +5837,14 @@ function InvestmentsPage({ investments, settings, onAdd, onEdit, onDelete }) {
                   const g = inv.currentValue - inv.invested;
                   const gp = inv.invested > 0 ? (g / inv.invested) * 100 : 0;
                   return (
-                    <tr key={inv.id} className="text-sm">
+                    <tr key={inv.id} onClick={() => setEditing(inv)} className="text-sm hover:bg-black/[0.03] cursor-pointer">
                       <td className="py-3 pr-3" style={{ color: 'var(--text)' }}><span className="inline-flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: INVESTMENT_CATEGORIES[inv.category] || '#A8A398' }} />{inv.name}</span></td>
                       <td className="py-3 pr-3 tabular-nums" style={{ color: 'var(--text-soft)' }}>{formatBRL(inv.invested)}</td>
                       <td className="py-3 pr-3 tabular-nums" style={{ color: 'var(--text)' }}>{formatBRL(inv.currentValue)}</td>
                       <td className="py-3 pr-3 tabular-nums font-medium" style={{ color: g >= 0 ? 'var(--income)' : 'var(--expense)' }}>{g >= 0 ? '+' : ''}{gp.toFixed(1)}%</td>
-                      <td className="py-3 pr-3">
+                      <td className="py-3 pr-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
-                          <button onClick={() => setEditing(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
+                          <button onClick={() => setEditing(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Editar"><Pencil size={14} color="var(--primary)" /></button>
                           <button onClick={() => setConfirmDelete(inv)} className="p-2 rounded-lg hover:bg-black/5" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                         </div>
                       </td>
@@ -5934,7 +6100,8 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                   return (
                     <div
                       key={r.id}
-                      className="flex items-center gap-3 py-3 px-1 hover:bg-black/[0.02] rounded-lg"
+                      onClick={() => setEditingItem(r)}
+                      className="flex items-center gap-3 py-3 px-1 hover:bg-black/[0.03] rounded-lg cursor-pointer"
                       style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
                     >
                       <IconCircle icon={cat.icon} color={cat.color} soft={cat.soft} size={36} />
@@ -5946,8 +6113,8 @@ function RecurringExpensesPage({ recurring, accounts, cards, settings, onAdd, on
                         </div>
                       </div>
                       <span className="text-sm tabular-nums font-medium shrink-0" style={{ color: 'var(--expense)' }}>- {formatBRL(r.value)}</span>
-                      <button onClick={() => setEditingItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar"><Pencil size={14} color="var(--text-soft)" /></button>
-                      <button onClick={() => setConfirmDeleteItem(r)} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingItem(r); }} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Editar"><Pencil size={14} color="var(--primary)" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteItem(r); }} className="p-2 rounded-lg hover:bg-black/5 shrink-0" title="Excluir"><Trash2 size={14} color="var(--expense)" /></button>
                     </div>
                   );
                 })}
@@ -6572,6 +6739,33 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [editingSearchResult, setEditingSearchResult] = useState(null);
   const [toasts, setToasts] = useState([]);
+  // O balão de feedback (toast) não deve bloquear a tela: ele fica "fantasma" a clique (o
+  // ToastContainer usa pointer-events: none), então um clique onde ele está visualmente passa
+  // direto pro que está atrás. E qualquer clique em qualquer lugar da tela, enquanto ele ainda
+  // está visível, já o dispensa na hora — não precisa esperar os ~3.5s do timeout.
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    function dismissAll() { setToasts([]); }
+    document.addEventListener('pointerdown', dismissAll, { capture: true });
+    return () => document.removeEventListener('pointerdown', dismissAll, { capture: true });
+  }, [toasts.length]);
+  // Atalhos de teclado no PC (ignorados enquanto digita num campo ou com algum modal aberto):
+  // N abre "Novo lançamento", / leva o cursor pra busca do cabeçalho.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement;
+      const typing = el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
+      if (typing || document.querySelector('[data-modal]')) return;
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setModal({ type: 'newTransaction' }); }
+      else if (e.key === '/') {
+        const input = document.getElementById('global-search');
+        if (input) { e.preventDefault(); input.focus(); }
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // Guarda o TEXTO de cada aviso já dispensado nesta sessão (não persiste — reaparece se
   // recarregar a página), não só "já dispensei algo": assim, dispensar o aviso de saldo baixo
   // não esconde um aviso diferente e mais urgente que surja depois (ex: fatura vencendo hoje).
@@ -7015,6 +7209,11 @@ export default function App() {
     setAccounts(updated); persist({ accounts: updated });
     addToast('Conta adicionada.');
   }
+  function editAccount(form) {
+    const updated = accounts.map((a) => (a.id === form.id ? { ...a, bank: form.bank, type: form.type } : a));
+    setAccounts(updated); persist({ accounts: updated });
+    addToast('Conta atualizada.');
+  }
   function deleteAccount(acc) {
     const updated = accounts.filter((a) => a.id !== acc.id);
     setAccounts(updated); persist({ accounts: updated });
@@ -7039,6 +7238,11 @@ export default function App() {
     const updatedAccounts = applyBalanceDelta(accounts, form.accountId, -(form.balance || 0));
     setCaixinhas(updated); setAccounts(updatedAccounts); persist({ caixinhas: updated, accounts: updatedAccounts });
     addToast('Caixinha criada.');
+  }
+  function editCaixinha(form) {
+    const updated = caixinhas.map((c) => (c.id === form.id ? { ...c, name: form.name } : c));
+    setCaixinhas(updated); persist({ caixinhas: updated });
+    addToast('Caixinha atualizada.');
   }
   function deleteCaixinha(cx) {
     const updated = caixinhas.filter((c) => c.id !== cx.id);
@@ -7135,6 +7339,11 @@ export default function App() {
     const updated = [...benefits, { ...form, id: uid() }];
     setBenefits(updated); persist({ benefits: updated });
     addToast('Vale-benefícios adicionado.');
+  }
+  function editBenefit(form) {
+    const updated = benefits.map((x) => (x.id === form.id ? { ...x, provider: form.provider } : x));
+    setBenefits(updated); persist({ benefits: updated });
+    addToast('Vale-benefícios atualizado.');
   }
   function deleteBenefit(b) {
     const updated = benefits.filter((x) => x.id !== b.id);
@@ -7438,8 +7647,8 @@ export default function App() {
             <>
               {activePage === 'dashboard' && <DashboardPage data={data} actions={actions} />}
               {activePage === 'transacoes' && <TransactionsPage transactions={transactions} accounts={accounts} cards={cards} benefits={benefits} settings={settings} onAdd={addTransaction} onEdit={editTransaction} onDelete={deleteTransaction} onImport={importTransactions} onMarkPaid={markTransactionPaid} onGoToFatura={goToFatura} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
-              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
-              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceInstallments} benefits={benefits} onAddBenefit={addBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
+              {activePage === 'contas' && <AccountsPage accounts={accounts} caixinhas={caixinhas} transactions={transactions} settings={settings} onAddAccount={addAccount} onEditAccount={editAccount} onDeleteAccount={deleteAccount} onSetAccountThreshold={setAccountThreshold} onSetAccountBalance={setAccountBalance} onAddCaixinha={addCaixinha} onEditCaixinha={editCaixinha} onDeleteCaixinha={deleteCaixinha} onUpdateCaixinhaValue={updateCaixinhaValue} />}
+              {activePage === 'cartoes' && <CardsPage cards={cards} transactions={transactions} accounts={accounts} recurring={recurring} settings={settings} cardGradients={cardGradients} onAdd={addCard} onEdit={editCard} onDelete={deleteCard} onPayInvoice={payCardInvoice} onAdvanceInstallments={advanceInstallments} benefits={benefits} onAddBenefit={addBenefit} onEditBenefit={editBenefit} onDeleteBenefit={deleteBenefit} onUpdateBenefit={updateBenefit} view={cardsView} onChangeView={setCardsView} onMarkPaid={markTransactionPaid} onEditTransaction={editTransaction} onDeleteTransaction={deleteTransaction} onImport={importTransactions} onBulkDelete={bulkDeleteTransactions} onBulkMoveNext={bulkMoveToMonth} onBulkChangeDate={bulkChangeDate} onBulkChangePayment={bulkChangePaymentMethod} />}
               {activePage === 'investimentos' && <InvestmentsPage investments={investments} settings={settings} onAdd={addInvestment} onEdit={editInvestment} onDelete={deleteInvestment} />}
               {activePage === 'metas' && <GoalsPage goals={goals} onAdd={addGoal} onEdit={editGoal} onAddFunds={addGoalFunds} onDelete={deleteGoal} onCompleted={celebrateGoalCompletion} />}
               {activePage === 'recorrentes' && <RecurringExpensesPage recurring={recurring} accounts={accounts} cards={cards} settings={settings} onAdd={addRecurring} onEdit={editRecurring} onDelete={deleteRecurring} onLaunchNow={addRecurringAsTransaction} />}
