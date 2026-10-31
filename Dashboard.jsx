@@ -2104,7 +2104,7 @@ function FloatingCalculator({ withFab }) {
         className="p-1.5 rounded-xl active:scale-95 transition-transform focus-ring"
         title={open ? 'Minimizar calculadora' : 'Calculadora'} aria-label="Calculadora" aria-expanded={open}
       >
-        <span className="relative w-7 h-7 rounded-lg flex items-center justify-center shadow-soft-lg" style={{ backgroundColor: open ? 'var(--primary)' : 'var(--card)', border: '1px solid var(--border)', transition: 'background-color 0.2s ease, transform 0.2s ease', transform: open ? 'scale(1.06)' : 'scale(1)' }}>
+        <span className="relative w-7 h-7 rounded-lg flex items-center justify-center shadow-soft-lg" style={{ backgroundColor: open ? 'var(--primary)' : 'var(--primary-soft)', border: '1px solid var(--primary)', transition: 'background-color 0.2s ease, transform 0.2s ease', transform: open ? 'scale(1.06)' : 'scale(1)' }}>
           <Calculator size={15} color={open ? '#fff' : 'var(--primary)'} className="absolute" style={{ transition: 'transform 0.22s ease, opacity 0.18s ease', opacity: open ? 0 : 1, transform: open ? 'rotate(-90deg) scale(0.6)' : 'none' }} />
           <X size={15} color="#fff" className="absolute" style={{ transition: 'transform 0.22s ease, opacity 0.18s ease', opacity: open ? 1 : 0, transform: open ? 'none' : 'rotate(90deg) scale(0.6)' }} />
         </span>
