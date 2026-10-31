@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useReducer } from 'react';
 import { createPortal } from 'react-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -13,7 +13,7 @@ import {
   ShoppingBag, ShoppingCart, Home, Car, Utensils, Heart, Flower2, Film, GraduationCap,
   Plane, Laptop, Award, Briefcase, Clock, ArrowRight, FileText, Loader2, Cloud,
   MessageCircle, Moon, Sun, Shirt, Bike, Building2, EyeOff, PersonStanding, Copy, Smartphone, MoreVertical,
-  Bookmark, ArrowRightCircle,
+  Bookmark, ArrowRightCircle, Calculator,
   PawPrint, Baby, Gift, Wrench, Shield, Coffee, Wifi, Tv, Gamepad2, BookOpen, Scissors, Fuel, Stethoscope, Pill,
 } from 'lucide-react';
 import Papa from 'papaparse';
@@ -164,6 +164,22 @@ const GLOBAL_STYLES = `
   0%   { transform: scale(0.5) rotate(0deg); }
   100% { transform: scale(1) rotate(-180deg); }
 }
+.calc-anchor { position: fixed; z-index: 20; right: 1.25rem; width: 56px; display: flex; flex-direction: column; align-items: center; }
+.calc-anchor.with-fab { bottom: calc(1.5rem + 56px + 0.25rem + env(safe-area-inset-bottom, 0px)); }
+.calc-anchor.no-fab { bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 1024px) {
+  .calc-anchor { right: 1.5rem; width: auto; align-items: flex-end; }
+  .calc-anchor.with-fab, .calc-anchor.no-fab { bottom: 1.5rem; }
+}
+.calc-panel-in { animation: calcIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom right; }
+.calc-panel-out { animation: calcOut 0.14s ease-in both; transform-origin: bottom right; }
+.calc-pop { animation: calcPop 0.18s ease-out both; }
+.calc-row-in { animation: calcRow 0.18s ease-out both; }
+@keyframes calcIn { from { opacity: 0; transform: translateY(8px) scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes calcOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(0.94); } }
+@keyframes calcPop { 0% { opacity: 0.55; transform: scale(0.94); } 60% { transform: scale(1.03); } 100% { opacity: 1; transform: none; } }
+@keyframes calcRow { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .calc-panel-in, .calc-panel-out, .calc-pop, .calc-row-in { animation: none; } }
 .fab-spin-in { animation: fabSpinIn 0.7s cubic-bezier(0.4, 0, 0.2, 1) both; }
 .fab-spin-out { animation: fabSpinOut 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
@@ -1843,6 +1859,257 @@ function SyncConflictModal({ date, onUseRemote, onKeepLocal }) {
         <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Usar a versão do Dropbox substitui os dados deste navegador. Manter os dados daqui reenvia essa versão para o Dropbox, sobrescrevendo o backup mais novo.</p>
       </div>
     </Modal>
+  );
+}
+
+
+/* ---------- Calculadora flutuante ---------- */
+
+// Botão pequeno (metade do tamanho do FAB) logo acima do botão de novo lançamento. Abre um painel
+// com uma calculadora simples. O estado da conta vive neste componente, que fica sempre montado
+// enquanto a calculadora estiver ativada — então clicar fora (ou no botão) só MINIMIZA o painel,
+// nunca limpa a conta; o usuário volta e continua de onde parou (até depois de recarregar a
+// página — conta e histórico ficam no localStorage). Só o "C" zera.
+const CALC_INITIAL = { display: '0', acc: null, op: null, fresh: true, expr: '' };
+const CALC_SYMBOLS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+function calcFormat(str) {
+  if (str === 'Erro' || /e/i.test(str)) return str.replace('.', ',');
+  const neg = str.startsWith('-');
+  const [int, dec] = (neg ? str.slice(1) : str).split('.');
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (neg ? '-' : '') + grouped + (dec !== undefined ? ',' + dec : '');
+}
+function calcCompute(a, op, b) {
+  let r;
+  if (op === '+') r = a + b;
+  else if (op === '-') r = a - b;
+  else if (op === '*') r = a * b;
+  else r = b === 0 ? NaN : a / b;
+  return Number.isFinite(r) ? Number(r.toPrecision(12)) : NaN;
+}
+function calcReducer(st, action) {
+  const cur = parseFloat(st.display);
+  switch (action.type) {
+    case 'clear': return CALC_INITIAL;
+    case 'digit':
+      if (st.display === 'Erro') return { ...CALC_INITIAL, display: action.d, fresh: false };
+      if (st.fresh) return { ...st, display: action.d, fresh: false };
+      if (st.display.replace(/[-.]/g, '').length >= 15) return st;
+      return { ...st, display: st.display === '0' ? action.d : st.display + action.d };
+    case 'dot':
+      if (st.display === 'Erro' || st.fresh) return { ...(st.display === 'Erro' ? CALC_INITIAL : st), display: '0.', fresh: false };
+      return st.display.includes('.') ? st : { ...st, display: st.display + '.' };
+    case 'back':
+      if (st.fresh || st.display === 'Erro') return st;
+      return { ...st, display: st.display.length > 1 && !(st.display.length === 2 && st.display[0] === '-') ? st.display.slice(0, -1) : '0' };
+    case 'sign':
+      return st.display === '0' || st.display === 'Erro' ? st : { ...st, display: st.display.startsWith('-') ? st.display.slice(1) : '-' + st.display };
+    case 'percent': {
+      if (st.display === 'Erro') return st;
+      const v = st.acc !== null && (st.op === '+' || st.op === '-') ? (st.acc * cur) / 100 : cur / 100;
+      return { ...st, display: String(Number(v.toPrecision(12))), fresh: false };
+    }
+    case 'op': {
+      if (st.display === 'Erro') return st;
+      if (st.op && st.fresh) return { ...st, op: action.op, expr: `${calcFormat(String(st.acc))} ${CALC_SYMBOLS[action.op]}` };
+      const base = st.acc !== null && st.op ? calcCompute(st.acc, st.op, cur) : cur;
+      if (Number.isNaN(base)) return { ...CALC_INITIAL, display: 'Erro' };
+      return { display: String(base), acc: base, op: action.op, fresh: true, expr: `${calcFormat(String(base))} ${CALC_SYMBOLS[action.op]}` };
+    }
+    case 'equals': {
+      if (!st.op || st.acc === null) return st;
+      const res = calcCompute(st.acc, st.op, cur);
+      const expr = `${calcFormat(String(st.acc))} ${CALC_SYMBOLS[st.op]} ${calcFormat(st.display)} =`;
+      if (Number.isNaN(res)) return { ...CALC_INITIAL, display: 'Erro', expr };
+      return { display: String(res), acc: null, op: null, fresh: true, expr };
+    }
+    case 'load':
+      return { ...st, display: action.value, fresh: true };
+    default: return st;
+  }
+}
+
+const CALC_STORAGE_KEY = 'cerne-calculadora-v1';
+function calcLoad() {
+  try {
+    const raw = window.localStorage.getItem(CALC_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.st && typeof parsed.st.display === 'string') return { st: { ...CALC_INITIAL, ...parsed.st }, history: Array.isArray(parsed.history) ? parsed.history.slice(0, 8) : [] };
+  } catch { /* storage indisponível ou corrompido: começa limpo */ }
+  return { st: CALC_INITIAL, history: [] };
+}
+function calcKeyLabel(a) {
+  if (a.type === 'digit') return a.d;
+  if (a.type === 'dot') return ',';
+  if (a.type === 'op') return CALC_SYMBOLS[a.op];
+  return { equals: '=', back: '⌫', percent: '%', clear: 'C', sign: '±' }[a.type] || null;
+}
+
+function FloatingCalculator({ withFab }) {
+  // 'closed' | 'open' | 'closing' — "closing" mantém o painel montado por ~140ms pra animar a saída.
+  const [panel, setPanel] = useState('closed');
+  const initial = useMemo(calcLoad, []);
+  const [st, dispatch] = useReducer(calcReducer, initial.st);
+  const [history, setHistory] = useState(initial.history);
+  const [showHistory, setShowHistory] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [flashKey, setFlashKey] = useState(null);
+  const [pulse, setPulse] = useState(0);
+  const anchorRef = useRef(null);
+  const closeTimer = useRef(null);
+  const stRef = useRef(st);
+  stRef.current = st;
+  const open = panel === 'open';
+
+  function openPanel() { clearTimeout(closeTimer.current); setPanel('open'); }
+  function closePanel() {
+    clearTimeout(closeTimer.current);
+    setPanel((p) => (p === 'open' ? 'closing' : p));
+    closeTimer.current = setTimeout(() => setPanel('closed'), 140);
+  }
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  // A conta e o histórico sobrevivem até a um recarregamento da página.
+  useEffect(() => {
+    try { window.localStorage.setItem(CALC_STORAGE_KEY, JSON.stringify({ st, history })); } catch { /* sem armazenamento: segue só em memória */ }
+  }, [st, history]);
+
+  // Toda ação passa por aqui: teclado e toque ganham o mesmo feedback (tecla "afunda" por um
+  // instante, resultado dá um leve "pop", vibração curtíssima no celular) e as contas concluídas
+  // entram no histórico.
+  const pressRef = useRef(null);
+  pressRef.current = function press(action, viaKeyboard) {
+    const label = calcKeyLabel(action);
+    if (label) { setFlashKey(label); setTimeout(() => setFlashKey((cur) => (cur === label ? null : cur)), 130); }
+    if (!viaKeyboard) { try { navigator.vibrate && navigator.vibrate(6); } catch { /* sem vibração */ } }
+    if (action.type === 'equals') {
+      const next = calcReducer(stRef.current, action);
+      if (next !== stRef.current) {
+        setPulse((n) => n + 1);
+        if (next.display !== 'Erro') setHistory((h) => [{ id: Date.now(), expr: next.expr, result: next.display }, ...h].slice(0, 8));
+      }
+    } else if (action.type === 'clear' || action.type === 'percent') setPulse((n) => n + 1);
+    dispatch(action);
+  };
+
+  // Clicar fora do painel (ou apertar Esc) só minimiza — o estado da conta fica guardado.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e) { if (anchorRef.current && !anchorRef.current.contains(e.target)) closePanel(); }
+    function onKey(e) {
+      if (e.key === 'Escape') { closePanel(); return; }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement;
+      if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
+      let action = null;
+      if (/^[0-9]$/.test(e.key)) action = { type: 'digit', d: e.key };
+      else if (e.key === '.' || e.key === ',') action = { type: 'dot' };
+      else if (['+', '-', '*', '/'].includes(e.key)) action = { type: 'op', op: e.key };
+      else if (e.key === 'x' || e.key === 'X') action = { type: 'op', op: '*' };
+      else if (e.key === '%') action = { type: 'percent' };
+      else if (e.key === 'Enter' || e.key === '=') action = { type: 'equals' };
+      else if (e.key === 'Backspace') action = { type: 'back' };
+      else if (e.key === 'c' || e.key === 'C') action = { type: 'clear' };
+      if (!action) return;
+      e.preventDefault();
+      pressRef.current(action, true);
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onPointerDown); window.removeEventListener('keydown', onKey); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  function copyResult() {
+    const text = st.display === 'Erro' ? '' : st.display.replace('.', ',');
+    if (!text) return;
+    try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* sem permissão de área de transferência */ }
+  }
+
+  const shown = calcFormat(st.display);
+  const keys = [
+    { l: 'C', a: { type: 'clear' }, kind: 'fn', aria: 'Limpar tudo' }, { l: '⌫', a: { type: 'back' }, kind: 'fn', aria: 'Apagar' }, { l: '%', a: { type: 'percent' }, kind: 'fn' }, { l: '÷', a: { type: 'op', op: '/' }, kind: 'op', op: '/' },
+    { l: '7', a: { type: 'digit', d: '7' } }, { l: '8', a: { type: 'digit', d: '8' } }, { l: '9', a: { type: 'digit', d: '9' } }, { l: '×', a: { type: 'op', op: '*' }, kind: 'op', op: '*' },
+    { l: '4', a: { type: 'digit', d: '4' } }, { l: '5', a: { type: 'digit', d: '5' } }, { l: '6', a: { type: 'digit', d: '6' } }, { l: '−', a: { type: 'op', op: '-' }, kind: 'op', op: '-' },
+    { l: '1', a: { type: 'digit', d: '1' } }, { l: '2', a: { type: 'digit', d: '2' } }, { l: '3', a: { type: 'digit', d: '3' } }, { l: '+', a: { type: 'op', op: '+' }, kind: 'op', op: '+' },
+    { l: '±', a: { type: 'sign' }, kind: 'fn', aria: 'Inverter sinal' }, { l: '0', a: { type: 'digit', d: '0' } }, { l: ',', a: { type: 'dot' }, aria: 'Vírgula' }, { l: '=', a: { type: 'equals' }, kind: 'eq', aria: 'Igual' },
+  ];
+
+  return (
+    <div ref={anchorRef} className={`calc-anchor ${withFab ? 'with-fab' : 'no-fab'} no-print`}>
+      {panel !== 'closed' && (
+        <div
+          data-calc-open
+          className={`${panel === 'closing' ? 'calc-panel-out' : 'calc-panel-in'} rounded-2xl shadow-soft-lg p-3 mb-2 w-[17.5rem] max-w-[calc(100vw-2rem)] self-end`}
+          style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+          role="dialog" aria-label="Calculadora"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--text-soft)' }}>Calculadora</span>
+            <div className="flex items-center gap-0.5">
+              <button onClick={() => setShowHistory((v) => !v)} className="p-1.5 rounded-lg hover:bg-black/5 relative transition-colors" style={{ backgroundColor: showHistory ? 'var(--primary-soft)' : undefined }} title="Histórico de contas" aria-label="Histórico de contas" aria-pressed={showHistory}>
+                <Clock size={14} color={showHistory ? 'var(--primary)' : 'var(--text-soft)'} />
+                {history.length > 0 && !showHistory && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--primary)' }} />}
+              </button>
+              <button onClick={copyResult} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: copied ? 'var(--income)' : 'var(--text-soft)' }} title="Copiar resultado" aria-label="Copiar resultado">
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+              <button onClick={closePanel} className="p-1.5 rounded-lg hover:bg-black/5" title="Minimizar (a conta fica guardada)" aria-label="Minimizar calculadora"><ChevronDown size={16} color="var(--text-soft)" /></button>
+            </div>
+          </div>
+          <div className="rounded-xl px-3 py-2 mb-2 text-right overflow-hidden" style={{ backgroundColor: 'var(--bg)' }} aria-live="polite">
+            <p className="text-[11px] h-4 truncate tabular-nums transition-opacity" style={{ color: 'var(--text-soft)', opacity: st.expr ? 1 : 0 }}>{st.expr || ' '}</p>
+            <p key={pulse} className={`font-display font-bold tabular-nums truncate ${pulse > 0 ? 'calc-pop' : ''}`} style={{ color: st.display === 'Erro' ? 'var(--expense)' : 'var(--text)', fontSize: shown.length > 13 ? '1.1rem' : shown.length > 9 ? '1.5rem' : '1.875rem', lineHeight: 1.2, transition: 'font-size 0.15s ease' }}>{shown}</p>
+          </div>
+          {showHistory && (
+            <div className="mb-2 rounded-xl overflow-hidden calc-row-in" style={{ border: '1px solid var(--border)' }}>
+              {history.length === 0 ? (
+                <p className="text-[11px] text-center py-3" style={{ color: 'var(--text-soft)' }}>As contas concluídas aparecem aqui.</p>
+              ) : (
+                <>
+                  <div className="max-h-28 overflow-y-auto">
+                    {history.map((h, i) => (
+                      <button key={h.id} onClick={() => dispatch({ type: 'load', value: h.result })} className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-black/[0.04] transition-colors ${i === 0 ? 'calc-row-in' : ''}`} style={i > 0 ? { borderTop: '1px solid var(--border)' } : undefined} title="Usar este resultado">
+                        <span className="text-[11px] truncate tabular-nums" style={{ color: 'var(--text-soft)' }}>{h.expr}</span>
+                        <span className="text-xs font-semibold tabular-nums shrink-0" style={{ color: 'var(--text)' }}>{calcFormat(h.result)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setHistory([])} className="w-full text-[11px] font-medium py-1 hover:bg-black/[0.04]" style={{ color: 'var(--text-soft)', borderTop: '1px solid var(--border)' }}>Limpar histórico</button>
+                </>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-4 gap-1.5">
+            {keys.map((k) => {
+              const active = k.kind === 'op' && st.op === k.op && st.fresh;
+              const flashing = flashKey === k.l;
+              const style = k.kind === 'eq' ? { backgroundColor: 'var(--primary)', color: '#fff' }
+                : k.kind === 'op' ? { backgroundColor: active ? 'var(--primary)' : 'var(--primary-soft)', color: active ? '#fff' : 'var(--primary-dark)' }
+                : k.kind === 'fn' ? { backgroundColor: 'var(--bg)', color: 'var(--text-soft)' }
+                : { backgroundColor: 'var(--bg)', color: 'var(--text)' };
+              return (
+                <button
+                  key={k.l} onClick={() => pressRef.current(k.a, false)} aria-label={k.aria || k.l}
+                  className="h-11 rounded-xl text-base font-semibold hover:brightness-95 focus-ring"
+                  style={{ ...style, transform: flashing ? 'scale(0.92)' : 'scale(1)', filter: flashing ? 'brightness(0.9)' : undefined, transition: 'transform 0.12s ease, filter 0.12s ease, background-color 0.18s ease, color 0.18s ease' }}
+                >{k.l}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => (open ? closePanel() : openPanel())}
+        className="p-1.5 rounded-xl active:scale-95 transition-transform focus-ring"
+        title={open ? 'Minimizar calculadora' : 'Calculadora'} aria-label="Calculadora" aria-expanded={open}
+      >
+        <span className="relative w-7 h-7 rounded-lg flex items-center justify-center shadow-soft-lg" style={{ backgroundColor: open ? 'var(--primary)' : 'var(--card)', border: '1px solid var(--border)', transition: 'background-color 0.2s ease, transform 0.2s ease', transform: open ? 'scale(1.06)' : 'scale(1)' }}>
+          <Calculator size={15} color={open ? '#fff' : 'var(--primary)'} className="absolute" style={{ transition: 'transform 0.22s ease, opacity 0.18s ease', opacity: open ? 0 : 1, transform: open ? 'rotate(-90deg) scale(0.6)' : 'none' }} />
+          <X size={15} color="#fff" className="absolute" style={{ transition: 'transform 0.22s ease, opacity 0.18s ease', opacity: open ? 1 : 0, transform: open ? 'none' : 'rotate(90deg) scale(0.6)' }} />
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -6573,6 +6840,13 @@ function SettingsPage({ settings, onChangeSettings, onEditCategory, onReset, onC
           </div>
           <ToggleSwitch checked={settings.fabEnabled !== false} onChange={(v) => onChangeSettings({ ...settings, fabEnabled: v })} label="Botão flutuante de novo lançamento" />
         </div>
+        <div className="flex items-center justify-between gap-3 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Calculadora flutuante</p>
+            <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Botão pequeno logo acima do botão de novo lançamento que abre uma calculadora em qualquer aba. Clicar fora só minimiza — a conta não é apagada até você tocar em C.</p>
+          </div>
+          <ToggleSwitch checked={settings.calculatorEnabled !== false} onChange={(v) => onChangeSettings({ ...settings, calculatorEnabled: v })} label="Calculadora flutuante" />
+        </div>
       </Card>
 
       <CategoriesSettingsSection settings={settings} onChangeSettings={onChangeSettings} onEditCategory={onEditCategory} />
@@ -6756,7 +7030,7 @@ export default function App() {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const el = document.activeElement;
       const typing = el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
-      if (typing || document.querySelector('[data-modal]')) return;
+      if (typing || document.querySelector('[data-modal], [data-calc-open]')) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setModal({ type: 'newTransaction' }); }
       else if (e.key === '/') {
         const input = document.getElementById('global-search');
@@ -7684,6 +7958,7 @@ export default function App() {
 
       <ToastContainer toasts={toasts} />
       {settings.fabEnabled !== false && <FAB onClick={() => setModal({ type: 'newTransaction' })} shrink={fabScrolling} />}
+      {settings.calculatorEnabled !== false && <FloatingCalculator withFab={settings.fabEnabled !== false} />}
       {celebration && <GoalCelebration key={celebration.id} origin={celebration.origin} onDone={() => setCelebration(null)} />}
     </div>
   );
