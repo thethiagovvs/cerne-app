@@ -515,9 +515,16 @@ function isRealized(t) {
   if (t.type === 'despesa' && t.cardId) return true;
   return t.status === 'Pago';
 }
+// Texto que começa com = + - @ vira fórmula ao abrir no Excel/Sheets (injeção de fórmula, ex: uma
+// descrição importada de um CSV de terceiros). O apóstrofo inicial força a célula a ser texto.
+function safeSheetText(v) {
+  const str = v == null ? '' : String(v);
+  return /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+}
+function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 function applyBalanceDelta(accountsList, accountId, delta) {
   if (!accountId || !delta) return accountsList;
-  return accountsList.map((a) => (a.id === accountId ? { ...a, balance: a.balance + delta } : a));
+  return accountsList.map((a) => (a.id === accountId ? { ...a, balance: round2(a.balance + delta) } : a));
 }
 // Desfaz o efeito do lançamento antigo (se houver) e aplica o efeito do novo (se houver) —
 // cobre criar (oldTx null), editar (os dois) e excluir (newTx null) com a mesma lógica.
@@ -662,10 +669,10 @@ function shiftToAdjacentInvoiceCycle(card, dateStr, direction) {
 // "já faz parte dessa fatura" de "só vai entrar na próxima", igual o getCardInvoiceCycle usa pra
 // agrupar lançamentos na Fatura mensal.
 function getOpenInvoiceClosingDate(card, referenceDate = new Date()) {
-  const dueDate = getNextCardDueDate(card, referenceDate);
-  const dueMonthOffset = card.dueDay < card.closingDay ? 1 : 0;
-  const closingRef = new Date(dueDate.getFullYear(), dueDate.getMonth() - dueMonthOffset, 1);
-  return new Date(closingRef.getFullYear(), closingRef.getMonth(), Math.min(card.closingDay, daysInMonth(closingRef.getFullYear(), closingRef.getMonth())));
+  // Fechamento da fatura ABERTA (a que ainda está recebendo compras): o ciclo seguinte ao último
+  // que já fechou. Não depende do vencimento nem de a fatura anterior estar paga.
+  const open = cycleFromIndex(cycleIndex(getLastClosedCycle(card, referenceDate)) + 1);
+  return closingDateOf(card, open.year, open.month);
 }
 // Ainda usada por dados salvos antes desta versão (quando o app guardava paidThroughDate) — hoje
 // nada mais grava esse campo, mas encaixar um valor salvo antigo no fechamento de ciclo válido
@@ -677,15 +684,55 @@ function snapToClosingBoundary(card, dateStr) {
   return ymd(closing);
 }
 
-// Valor em aberto do ciclo de fatura corrente do cartão: soma das compras do ciclo menos os
-// pagamentos já feitos dentro dele (lançamentos com isInvoicePayment) — não depende de marcar
-// item por item como pago, então um pagamento parcial já reflete corretamente aqui.
+// ---- Ciclos de fatura ----
+// Um "ciclo" é identificado pelo mês em que a fatura FECHA ({year, month}, mês 0-indexado).
+function cycleIndex(c) { return c.year * 12 + c.month; }
+function cycleFromIndex(i) { return { year: Math.floor(i / 12), month: ((i % 12) + 12) % 12 }; }
+function closingDateOf(card, year, month) {
+  const norm = new Date(year, month, 1);
+  return new Date(norm.getFullYear(), norm.getMonth(), Math.min(card.closingDay, daysInMonth(norm.getFullYear(), norm.getMonth())));
+}
+// Último ciclo que JÁ fechou na data de referência (a fatura "fechada", esperando pagamento).
+function getLastClosedCycle(card, referenceDate = new Date()) {
+  return getCardInvoiceCycle(card, snapToClosingBoundary(card, ymd(referenceDate)));
+}
+// Em qual fatura um lançamento entra. Compras: pela data e pelo fechamento. Pagamento de fatura:
+// pela fatura que ele QUITA (guardada em invoiceCycle) — nunca pela data em que foi pago, senão
+// um pagamento feito depois do fechamento caía na fatura seguinte e a bagunçava. Pagamentos
+// antigos (sem invoiceCycle) são atribuídos ao último fechamento anterior à data do pagamento.
+function getTransactionCycle(card, t) {
+  if (t.isInvoicePayment) {
+    if (t.invoiceCycle && typeof t.invoiceCycle.year === 'number') return t.invoiceCycle;
+    return getCardInvoiceCycle(card, snapToClosingBoundary(card, t.date));
+  }
+  return getCardInvoiceCycle(card, t.date);
+}
+function cycleNet(card, transactions, cycle) {
+  const idx = cycleIndex(cycle);
+  return round2(transactions
+    .filter((t) => t.cardId === card.id && t.type === 'despesa' && cycleIndex(getTransactionCycle(card, t)) === idx)
+    .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0));
+}
+// Vencimento (já ajustado pra dia útil) da fatura que fecha no ciclo informado. Se o vencimento
+// vem antes do fechamento no calendário (ex: fecha 28, vence 10), ele cai no mês seguinte.
+function getCycleDueDate(card, cycle) {
+  const offset = card.dueDay < card.closingDay ? 1 : 0;
+  return getAdjustedDueDate(cycle.year, cycle.month + offset, card.dueDay);
+}
+// A fatura "atual" é a que precisa de atenção: a última FECHADA que ainda tem saldo a pagar; se
+// ela já está quitada, é a fatura ABERTA (recebendo compras). Uma definição só, usada em todo o app.
+// `usedLimit` soma as duas (fechada não paga + aberta), que é o que realmente ocupa o limite.
+function getCurrentInvoice(card, transactions, referenceDate = new Date()) {
+  const closed = getLastClosedCycle(card, referenceDate);
+  const open = cycleFromIndex(cycleIndex(closed) + 1);
+  const closedNet = Math.max(0, cycleNet(card, transactions, closed));
+  const openNet = Math.max(0, cycleNet(card, transactions, open));
+  const isClosed = closedNet > 0.004;
+  const cycle = isClosed ? closed : open;
+  return { cycle, amount: isClosed ? closedNet : openNet, isClosed, dueDate: getCycleDueDate(card, cycle), usedLimit: closedNet + openNet };
+}
 function computeCardInvoice(card, transactions, referenceDate = new Date()) {
-  const currentCycle = getCardInvoiceCycle(card, ymd(referenceDate));
-  const net = transactions
-    .filter((t) => t.cardId === card.id && t.type === 'despesa' && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === currentCycle.year && c.month === currentCycle.month; })())
-    .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0);
-  return Math.max(0, net);
+  return getCurrentInvoice(card, transactions, referenceDate).amount;
 }
 
 /* ---------- Dias úteis / feriados nacionais (para vencimento adaptativo) ---------- */
@@ -1371,10 +1418,11 @@ function generateInsights({ transactions, goals, monthlyHistory: mh, accounts = 
   });
 
   cards.forEach((c) => {
-    const due = getNextCardDueDate(c);
+    const current = getCurrentInvoice(c, transactions);
+    const due = current.dueDate;
     const daysLeft = Math.round((due - new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())) / 86400000);
-    if (daysLeft >= 0 && daysLeft <= 5) {
-      const invoice = computeCardInvoice(c, transactions);
+    if (daysLeft >= 0 && daysLeft <= 5 && current.amount > 0) {
+      const invoice = current.amount;
       insights.unshift({
         icon: CalendarIcon, tone: 'alert',
         text: daysLeft === 0
@@ -1800,9 +1848,23 @@ function LoadingScreen() {
 
 /* ---------- Modal ---------- */
 
+// Pilha de modais abertos: Esc fecha só o do topo (antes, com um modal aberto sobre outro, um
+// único Esc fechava os dois de uma vez e perdia o que estava sendo preenchido embaixo).
+const MODAL_STACK = [];
 function Modal({ title, onClose, children, wide }) {
+  const modalIdRef = useRef(null);
+  if (modalIdRef.current === null) modalIdRef.current = Symbol('modal');
   useEffect(() => {
-    function handleEsc(e) { if (e.key === 'Escape') onClose(); }
+    const id = modalIdRef.current;
+    MODAL_STACK.push(id);
+    return () => { const i = MODAL_STACK.lastIndexOf(id); if (i >= 0) MODAL_STACK.splice(i, 1); };
+  }, []);
+  useEffect(() => {
+    function handleEsc(e) {
+      if (e.key !== 'Escape') return;
+      if (MODAL_STACK[MODAL_STACK.length - 1] !== modalIdRef.current) return;
+      onClose();
+    }
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
@@ -2551,12 +2613,12 @@ function computeKPIs(period, customRange, mh, transactions, accounts, cards, goa
     if (!card) return sum;
     const cyclesInPeriod = new Set(transactions
       .filter((t) => t.cardId === cardId && t.type === 'despesa' && !t.isInvoicePayment && t.date >= periodStart && t.date <= periodEnd)
-      .map((t) => { const c = getCardInvoiceCycle(card, t.date); return `${c.year}-${c.month}`; }));
+      .map((t) => { const c = getTransactionCycle(card, t); return `${c.year}-${c.month}`; }));
     let cardTotal = 0;
     cyclesInPeriod.forEach((key) => {
       const [y, m] = key.split('-').map(Number);
       const net = transactions
-        .filter((t) => t.cardId === cardId && t.type === 'despesa' && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === y && c.month === m; })())
+        .filter((t) => t.cardId === cardId && t.type === 'despesa' && (() => { const c = getTransactionCycle(card, t); return c.year === y && c.month === m; })())
         .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0);
       cardTotal += Math.max(0, net);
     });
@@ -3125,7 +3187,8 @@ function FinancialCalendar({ cards, transactions, onNewTransaction }) {
     events.push({ day: d.getDate(), label: t.description, type: t.type === 'receita' ? 'recebimento' : 'gasto', amount: t.amount });
   });
   cards.forEach((c) => {
-    const invoice = computeCardInvoice(c, transactions);
+    // Fatura que VENCE neste mês (não a atual): o ciclo que fechou no mês anterior se o vencimento vem antes do fechamento.
+    const invoice = Math.max(0, cycleNet(c, transactions, cycleFromIndex(year * 12 + month - (c.dueDay < c.closingDay ? 1 : 0))));
     const adjustedDue = getAdjustedDueDate(year, month, c.dueDay);
     if (adjustedDue.getMonth() === month) {
       const wasAdjusted = adjustedDue.getDate() !== Math.min(c.dueDay, new Date(year, month + 1, 0).getDate());
@@ -3280,7 +3343,7 @@ function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, mo
     // total do mês sendo exibido sempre que o cartão já tinha fechado o ciclo daquele mês — daí
     // o valor não bater com "0 lançamentos" logo abaixo, e não mudar ao trocar de mês.
     const cycleItems = transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id
-      && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === year && c.month === month; })());
+      && (() => { const c = getTransactionCycle(card, t); return c.year === year && c.month === month; })());
     // Na subview "Todas as despesas do mês" a lista abaixo usa mês calendário, não ciclo de
     // fatura (de propósito, pra misturar débito e crédito) — então essa linha do topo precisa
     // mostrar o mesmo total por mês calendário quando um cartão está selecionado ali, senão os
@@ -3291,6 +3354,7 @@ function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, mo
     return { displayInvoice: Math.max(0, monthItems.reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0)), displayCount: monthItems.length };
   }, [card, transactions, year, month, subview]);
 
+  const dueLabel = getCycleDueDate(card, { year, month }).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
   return (
     <div
       role="button" tabIndex={0}
@@ -3304,7 +3368,7 @@ function CardInvoiceRow({ card, transactions, selected, onToggleSelect, year, mo
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{card.bank}</p>
-        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--text-soft)' }}>{subview === 'fatura' ? `Fecha dia ${card.closingDay} · vence ${dueLabel}` : card.brand} · {displayCount} lançamento{displayCount === 1 ? '' : 's'}</p>
       </div>
       <p className="text-sm font-semibold tabular-nums shrink-0" style={{ color: 'var(--text)' }}>{formatBRL(displayInvoice)}</p>
     </div>
@@ -3318,28 +3382,30 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
   // parcelas e vencimento/limite são conceitos do "agora", não fazem sentido pra um mês
   // navegado (passado ou futuro), então ficam ocultos.
   const isHistoricalView = !!viewedCycle;
+  const currentInvoice = useMemo(() => getCurrentInvoice(card, transactions), [card, transactions]);
   const invoice = useMemo(() => {
     if (isHistoricalView) {
       return Math.max(0, transactions
         .filter((t) => t.type === 'despesa' && t.cardId === card.id)
-        .filter((t) => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })
+        .filter((t) => { const c = getTransactionCycle(card, t); return c.year === viewedCycle.year && c.month === viewedCycle.month; })
         .reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0));
     }
-    return computeCardInvoice(card, transactions);
+    return currentInvoice.amount;
   }, [card, transactions, isHistoricalView, viewedCycle?.year, viewedCycle?.month]);
   const invoiceCount = useMemo(() => {
     if (!isHistoricalView) return 0;
-    return transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && (() => { const c = getCardInvoiceCycle(card, t.date); return c.year === viewedCycle.year && c.month === viewedCycle.month; })()).length;
+    return transactions.filter((t) => t.type === 'despesa' && t.cardId === card.id && (() => { const c = getTransactionCycle(card, t); return c.year === viewedCycle.year && c.month === viewedCycle.month; })()).length;
   }, [card, transactions, isHistoricalView, viewedCycle?.year, viewedCycle?.month]);
-  const percentUsed = card.limit > 0 ? (invoice / card.limit) * 100 : 0;
+  const usedLimit = isHistoricalView ? invoice : currentInvoice.usedLimit;
+  const percentUsed = card.limit > 0 ? (usedLimit / card.limit) * 100 : 0;
   const barColor = percentUsed > 85 ? 'var(--expense)' : percentUsed > 65 ? 'var(--alert)' : 'var(--income)';
-  const nextDue = useMemo(() => getNextCardDueDate(card), [card.dueDay]);
-  const dueWasAdjusted = nextDue.getDate() !== card.dueDay;
+  const nextDue = currentInvoice.dueDate;
+  const dueWasAdjusted = nextDue.getDate() !== Math.min(card.dueDay, daysInMonth(nextDue.getFullYear(), nextDue.getMonth()));
   const nextDueLabel = nextDue.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
   const [showPayModal, setShowPayModal] = useState(false);
   const [confirmAdvance, setConfirmAdvance] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
-  const openClosing = useMemo(() => getOpenInvoiceClosingDate(card), [card.dueDay, card.closingDay]);
+  const openClosing = useMemo(() => getOpenInvoiceClosingDate(card), [card.closingDay]);
   const futureInstallments = useMemo(() => {
     const cutoff = ymd(openClosing);
     return transactions.filter((t) => t.cardId === card.id && t.installmentGroupId && t.date > cutoff);
@@ -3366,7 +3432,7 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
       </div>
       <div className="flex items-end justify-between mb-4">
         <div>
-          <p className="text-xs opacity-70 mb-1">{isHistoricalView ? `Fatura de ${viewedCycle.label}` : 'Fatura atual'}</p>
+          <p className="text-xs opacity-70 mb-1">{isHistoricalView ? `Fatura de ${viewedCycle.label}` : (currentInvoice.isClosed ? 'Fatura fechada' : 'Fatura atual (aberta)')}</p>
           <p className="font-display text-2xl font-bold tabular-nums">{formatBRL(invoice)}</p>
         </div>
         {!isHistoricalView && (invoice > 0 ? (
@@ -3389,13 +3455,13 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
             </div>
           </div>
           <div className="flex items-center justify-between text-xs opacity-80">
-            <span>{formatBRL(invoice)} de {formatBRL(card.limit)}</span>
+            <span>{formatBRL(usedLimit)} de {formatBRL(card.limit)}</span>
             <span>{percentUsed.toFixed(0)}% usado</span>
           </div>
           <div className="flex items-center justify-between text-xs opacity-70 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.2)' }}>
             <span>Fecha dia {card.closingDay}</span>
             <span className="text-right">
-              Próx. vencimento: {nextDueLabel}
+              Vence em {nextDueLabel}
               {dueWasAdjusted && <span className="block opacity-70">(dia {card.dueDay}, antecipado p/ dia útil)</span>}
             </span>
           </div>
@@ -3408,7 +3474,7 @@ function CreditCardVisual({ card, transactions, accounts = [], gradient, onPayIn
         </>
       )}
       {showPayModal && (
-        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId, payAmount) => onPayInvoice(card, payAmount, accountId)} onClose={() => setShowPayModal(false)} />
+        <PayInvoiceModal card={card} amount={invoice} accounts={accounts} onConfirm={(accountId, payAmount) => onPayInvoice(card, payAmount, accountId, currentInvoice.cycle)} onClose={() => setShowPayModal(false)} />
       )}
       {showEditForm && (
         <CardForm initial={card} accounts={accounts} hasOutstandingBalance={hasOutstandingBalance} onSave={(f) => { onEdit(f); setShowEditForm(false); }} onDelete={onDelete} onClose={() => setShowEditForm(false)} />
@@ -3686,7 +3752,7 @@ function DashboardPage({ data, actions }) {
 function TransactionForm({ initial, accounts, cards, benefits = [], transactions = [], onSave, onClose, onDelete, prefillDate, prefillType }) {
   const [form, setForm] = useState(initial || {
     type: prefillType || 'despesa', description: '', amount: 0, category: 'Mercado', account: accounts[0]?.id || '',
-    paymentMethod: 'Pix', date: prefillDate || new Date().toISOString().slice(0, 10), status: 'Pago',
+    paymentMethod: 'Pix', date: prefillDate || ymd(new Date()), status: 'Pago',
     isSalary: false, grossSalary: 0, dependents: 0, cardId: null, benefitId: null, benefitType: null,
   });
   const [errors, setErrors] = useState({});
@@ -4406,7 +4472,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
   }
   function exportCSV() {
-    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
+    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: safeSheetText(t.description), Categoria: safeSheetText(t.category), Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
     const csv = Papa.unparse(rows);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -4415,7 +4481,7 @@ function TransactionsPage({ transactions, accounts, cards, benefits = [], settin
     URL.revokeObjectURL(url);
   }
   function exportExcel() {
-    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: t.description, Categoria: t.category, Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
+    const rows = allTransactionsForExport().map((t) => ({ Data: formatDate(t.date), Descrição: safeSheetText(t.description), Categoria: safeSheetText(t.category), Tipo: t.type, Conta: accounts.find((a) => a.id === t.account)?.bank || 'Conta removida', 'Forma de pagamento': t.paymentMethod, Valor: t.amount, Status: t.status }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Transações');
@@ -5330,7 +5396,7 @@ function BulkMoveMonthModal({ onConfirm, onClose }) {
 }
 
 function BulkDateModal({ onConfirm, onClose }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(ymd(new Date()));
   return (
     <Modal title="Alterar data" onClose={onClose}>
       <div className="space-y-4">
@@ -5387,7 +5453,16 @@ function BulkPaymentModal({ accounts, cards, onConfirm, onClose }) {
 }
 
 function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], cardGradients, onAdvanceInstallments, onMarkPaid, onEditTransaction, onDeleteTransaction, onImport, onBulkDelete, onBulkMoveNext, onBulkChangeDate, onBulkChangePayment }) {
-  const [monthOffset, setMonthOffset] = useState(0);
+  // Abre já na fatura que importa agora: a mais antiga entre as "atuais" dos cartões (a fechada
+  // ainda não paga, ou a aberta se tudo estiver quitado) — e não sempre no mês do calendário.
+  // "Hoje" no navegador continua voltando pro mês corrente.
+  const [monthOffset, setMonthOffset] = useState(() => {
+    if (cards.length === 0) return 0;
+    const now = new Date();
+    const todayIdx = now.getFullYear() * 12 + now.getMonth();
+    const idxs = cards.map((c) => cycleIndex(getCurrentInvoice(c, transactions).cycle));
+    return Math.min(...idxs) - todayIdx;
+  });
   const [cardFilter, setCardFilter] = useState('all'); // 'all' | <cardId> — selecionado clicando na linha do cartão, ou pelo filtro
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -5511,7 +5586,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
       if (categoryFilter !== 'all' && t.category !== categoryFilter) return false;
       const card = cards.find((c) => c.id === t.cardId);
       if (!card) return false;
-      const cycle = getCardInvoiceCycle(card, t.date);
+      const cycle = getTransactionCycle(card, t);
       if (cycle.year !== year || cycle.month !== month) return false;
       if (search.trim()) {
         const q = stripDiacritics(search.trim()).toLowerCase();
@@ -5532,7 +5607,7 @@ function MonthlyInvoicePage({ cards, transactions, accounts, benefits = [], card
     .sort((a, b) => b.date.localeCompare(a.date)), [transactions, cardFilter, paymentMethodFilter, categoryFilter, year, month, search]);
 
   const list = subview === 'fatura' ? faturaTx : todasTx;
-  const total = Math.max(0, list.reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0));
+  const total = Math.max(0, round2(list.reduce((s, t) => s + (t.isInvoicePayment ? -t.amount : t.amount), 0)));
   // Uma única tag resumindo a fatura inteira, em vez de repetir Pago/Pendente em cada linha (que
   // normalmente é tudo igual, já que o pagamento acontece de uma vez pra fatura toda). Compara
   // cobranças com pagamentos do ciclo (o mesmo saldo líquido usado em todo o resto do app), não
@@ -7071,6 +7146,7 @@ export default function App() {
   const [dropboxSyncError, setDropboxSyncError] = useState(false);
   const [lastModified, setLastModified] = useState(null);
   const [syncConflict, setSyncConflict] = useState(null);
+  const [pendingBackup, setPendingBackup] = useState(null);
   const dismissedSyncRef = useRef(null);
   const lastModifiedRef = useRef(null);
   useEffect(() => { lastModifiedRef.current = lastModified; }, [lastModified]);
@@ -7266,14 +7342,32 @@ export default function App() {
       setDropboxBusy(false);
     }
   }
+  // Confere se o objeto parece mesmo um backup do Cerne antes de deixar ele substituir os dados.
+  function isValidBackupData(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    const listKeys = ['transactions', 'accounts', 'cards', 'goals', 'caixinhas', 'recurring', 'benefits', 'investments'];
+    const present = listKeys.filter((k) => data[k] !== undefined);
+    if (present.length === 0) return false;
+    return present.every((k) => Array.isArray(data[k]));
+  }
+  // Substituir tudo é irreversível: pede confirmação mostrando o que o backup traz.
+  function requestBackupApply(data, label) {
+    if (!isValidBackupData(data)) { addToast('Esse arquivo não parece ser um backup do Cerne.', 'error'); return; }
+    setPendingBackup({ data, label });
+  }
+  function confirmBackupApply() {
+    if (!pendingBackup) return;
+    applyLoadedData(pendingBackup.data);
+    saveAppData(pendingBackup.data);
+    addToast(`Dados restaurados de ${pendingBackup.label}.`);
+    setPendingBackup(null);
+  }
   async function restoreFromDropbox() {
     setDropboxBusy(true);
     try {
       const remote = await downloadLatestBackup();
       if (!remote) { addToast('Nenhum backup encontrado no Dropbox ainda.', 'error'); return; }
-      applyLoadedData(remote.data);
-      saveAppData(remote.data);
-      addToast(`Dados restaurados do backup "${remote.filename}".`);
+      requestBackupApply(remote.data, `backup "${remote.filename}"`);
     } catch (e) {
       addToast('Não foi possível restaurar o backup do Dropbox.', 'error');
     } finally {
@@ -7287,7 +7381,7 @@ export default function App() {
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `cerne-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.href = url; a.download = `cerne-backup-${ymd(new Date())}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
     addToast('Backup baixado.');
@@ -7297,9 +7391,7 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        applyLoadedData(data);
-        saveAppData(data);
-        addToast('Backup importado com sucesso.');
+        requestBackupApply(data, `arquivo "${file.name}"`);
       } catch (err) {
         addToast('Não foi possível ler esse arquivo — confira se é um backup exportado pelo Cerne.', 'error');
       }
@@ -7495,7 +7587,13 @@ export default function App() {
   }
   function deleteAccount(acc) {
     const updated = accounts.filter((a) => a.id !== acc.id);
-    setAccounts(updated); persist({ accounts: updated });
+    // Desvincula o que apontava pra essa conta (lançamentos, cartões, caixinhas) em vez de deixar
+    // referências soltas pra um id que não existe mais. O histórico dos lançamentos é mantido.
+    const newTransactions = transactions.map((t) => (t.account === acc.id ? { ...t, account: null } : t));
+    const newCards = cards.map((c) => (c.accountId === acc.id ? { ...c, accountId: '' } : c));
+    const newCaixinhas = caixinhas.map((c) => (c.accountId === acc.id ? { ...c, accountId: null } : c));
+    setAccounts(updated); setTransactions(newTransactions); setCards(newCards); setCaixinhas(newCaixinhas);
+    persist({ accounts: updated, transactions: newTransactions, cards: newCards, caixinhas: newCaixinhas });
     addToast('Conta removida.');
   }
   function setAccountThreshold(acc, value) {
@@ -7511,7 +7609,7 @@ export default function App() {
 
   /* ---- caixinhas ---- */
   function addCaixinha(form) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd(new Date());
     const history = form.balance > 0 ? [{ date: today, value: form.balance, note: null }] : [];
     const updated = [...caixinhas, { ...form, id: uid(), history }];
     const updatedAccounts = applyBalanceDelta(accounts, form.accountId, -(form.balance || 0));
@@ -7534,7 +7632,7 @@ export default function App() {
   // vinculada, e cada atualização fica registrada no histórico (com a observação, se houve uma).
   function updateCaixinhaValue(cx, newValue, note) {
     const delta = newValue - cx.balance;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd(new Date());
     const updated = caixinhas.map((c) => (c.id === cx.id
       ? { ...c, balance: newValue, history: [...(c.history || []), { date: today, value: newValue, note }] }
       : c));
@@ -7556,8 +7654,13 @@ export default function App() {
   }
   function deleteCard(card) {
     const updated = cards.filter((c) => c.id !== card.id);
-    setCards(updated); persist({ cards: updated });
-    addToast('Cartão removido.');
+    // Lançamentos do cartão ficam no histórico, mas deixam de apontar pra um cartão inexistente
+    // (senão sumiam de qualquer fatura e ficavam órfãos).
+    const newTransactions = transactions.map((t) => (t.cardId === card.id ? { ...t, cardId: null } : t));
+    const newRecurring = recurring.map((r) => (r.cardId === card.id ? { ...r, cardId: null } : r));
+    setCards(updated); setTransactions(newTransactions); setRecurring(newRecurring);
+    persist({ cards: updated, transactions: newTransactions, recurring: newRecurring });
+    addToast('Cartão removido. Os lançamentos dele continuam no histórico.');
   }
   // Pagar a fatura é um lançamento de verdade (despesa na conta escolhida) — é isso que faz o
   // saldo da conta cair e "zera" a fatura calculada do cartão a partir de hoje. Se o usuário
@@ -7569,12 +7672,14 @@ export default function App() {
   // depois, se o valor ou a data estiverem errados). O valor em aberto de cada ciclo é sempre
   // "cobranças menos pagamentos" (computeCardInvoice), então um pagamento parcial já reflete
   // certinho, sem precisar marcar lançamento por lançamento como pago.
-  function payCardInvoice(card, amount, accountId) {
-    const today = new Date().toISOString().slice(0, 10);
+  function payCardInvoice(card, amount, accountId, invoiceCycle) {
+    const today = ymd(new Date());
     const newTx = {
       id: uid(), description: `Pagamento fatura ${card.bank}`, amount, category: 'Outros', type: 'despesa',
       cardId: card.id, account: accountId || null, paymentMethod: 'Transferência', date: today, status: 'Pago',
       isInvoicePayment: true,
+      // Fatura que esse pagamento quita (não a da data em que foi pago).
+      invoiceCycle: invoiceCycle || getCurrentInvoice(card, transactions).cycle,
     };
     const updatedTransactions = [newTx, ...transactions];
     if (accountId) {
@@ -7632,7 +7737,7 @@ export default function App() {
   function updateBenefit(b, field, newValue, note) {
     const delta = newValue - b[field];
     const historyField = field === 'foodBalance' ? 'foodHistory' : 'mobilityHistory';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd(new Date());
     const updated = benefits.map((x) => (x.id === b.id
       ? { ...x, [field]: newValue, [historyField]: [...(x[historyField] || []), { date: today, value: newValue, note }] }
       : x));
@@ -7642,7 +7747,7 @@ export default function App() {
 
   /* ---- metas ---- */
   function addGoal(form) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd(new Date());
     const history = form.current > 0 ? [{ date: today, amount: form.current }] : [];
     const updated = [...goals, { ...form, id: uid(), history }];
     setGoals(updated); persist({ goals: updated });
@@ -7662,7 +7767,7 @@ export default function App() {
     addToast('Meta removida.');
   }
   function addGoalFunds(goal, amount) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd(new Date());
     const updated = goals.map((g) => (g.id === goal.id ? { ...g, current: g.current + amount, history: [...(g.history || []), { date: today, amount }] } : g));
     setGoals(updated); persist({ goals: updated });
     addToast(`${formatBRL(amount)} adicionado(s) à meta "${goal.name}".`);
@@ -7685,7 +7790,11 @@ export default function App() {
   function editRecurring(form) {
     const updatedRecurring = recurring.map((r) => (r.id === form.id ? form : r));
     const todayStr = ymd(new Date());
-    const withoutFutureOccurrences = transactions.filter((t) => !(t.recurringId === form.id && t.date >= todayStr));
+    // Só regera as ocorrências futuras ainda "intocadas" (Pendente e com o valor original).
+    // As que a pessoa já pagou ou ajustou na mão (outro valor/descrição) são preservadas.
+    const oldItem = recurring.find((r) => r.id === form.id);
+    const isUntouched = (t) => t.status === 'Pendente' && (!oldItem || (t.amount === oldItem.value && t.description === oldItem.name));
+    const withoutFutureOccurrences = transactions.filter((t) => !(t.recurringId === form.id && t.date >= todayStr && isUntouched(t)));
     const newOccurrences = generateRecurringOccurrences(form, cards, withoutFutureOccurrences);
     const updatedTransactions = [...withoutFutureOccurrences, ...newOccurrences];
     setRecurring(updatedRecurring); setTransactions(updatedTransactions);
@@ -7697,7 +7806,7 @@ export default function App() {
     const todayStr = ymd(new Date());
     // Remove só as ocorrências futuras geradas automaticamente — o que já venceu fica no
     // histórico, mesmo depois de descadastrar a despesa recorrente.
-    const updatedTransactions = transactions.filter((t) => !(t.recurringId === r.id && t.date >= todayStr));
+    const updatedTransactions = transactions.filter((t) => !(t.recurringId === r.id && t.date >= todayStr && t.status === 'Pendente'));
     setRecurring(updatedRecurring); setTransactions(updatedTransactions);
     persist({ recurring: updatedRecurring, transactions: updatedTransactions });
     addToast('Despesa recorrente removida — os lançamentos futuros dela também foram removidos.');
@@ -7721,7 +7830,7 @@ export default function App() {
       account: card ? card.accountId : fallbackAccount,
       cardId: card ? card.id : null,
       paymentMethod: card ? 'Cartão de crédito' : 'Não informado',
-      date: new Date().toISOString().slice(0, 10),
+      date: ymd(new Date()),
       status: card ? 'Pendente' : 'Pago',
       recurringId: item.id,
     });
@@ -7961,6 +8070,15 @@ export default function App() {
         <SyncConflictModal date={syncConflict.date} onUseRemote={resolveSyncUseRemote} onKeepLocal={resolveSyncKeepLocal} />
       )}
 
+      {pendingBackup && (
+        <ConfirmModal
+          title="Substituir seus dados?"
+          description={`Isso troca TODOS os dados atuais por ${pendingBackup.label}: ${(pendingBackup.data.transactions || []).length} lançamento(s), ${(pendingBackup.data.accounts || []).length} conta(s) e ${(pendingBackup.data.cards || []).length} cartão(ões). Não dá pra desfazer — se tiver dúvida, baixe um backup dos dados atuais antes.`}
+          confirmLabel="Substituir"
+          onConfirm={confirmBackupApply}
+          onClose={() => setPendingBackup(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} />
       {settings.fabEnabled !== false && <FAB onClick={() => setModal({ type: 'newTransaction' })} shrink={fabScrolling} />}
       {settings.calculatorEnabled !== false && <FloatingCalculator withFab={settings.fabEnabled !== false} />}
