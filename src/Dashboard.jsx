@@ -967,30 +967,52 @@ function isPaymentEntry(title) {
 }
 
 const CATEGORY_KEYWORDS = [
-  { category: 'Alimentação', keywords: ['ifood', 'ifd*', 'restaurante', 'lanchonete', 'padaria', 'burger', 'pizza'] },
-  { category: 'Mercado', keywords: ['mercado', 'supermercado', 'atacad', 'hortifruti'] },
-  { category: 'Transporte', keywords: ['99app', '99*', 'uber', 'combust', 'posto ', 'estacionamento'] },
-  { category: 'Saúde', keywords: ['totalpass', 'farmacia', 'farmácia', 'drogaria', 'academia'] },
-  { category: 'Lazer', keywords: ['steam', 'netflix', 'spotify', 'ingresso', 'cinema', 'nupay'] },
-  { category: 'Compras', keywords: ['mercadolivre', 'mercado livre', 'shopee', 'amazon', 'shein', 'aliexpress'] },
-  { category: 'Cuidado e Beleza', keywords: ['salao', 'salão', 'barbearia', 'cosmetic'] },
-  { category: 'Moradia', keywords: ['aluguel', 'condominio', 'condomínio', 'energia', 'sanepar', 'copel', 'claro', 'vivo', 'tim', 'oi fibra'] },
+  { category: 'Alimentação', keywords: ['ifood', 'ifd*', 'rappi', 'restaurante', 'lanchonete', 'padaria', 'burger', 'pizza', 'mcdonald', 'subway', 'sushi', 'churrasc', 'sorvete', 'acai', 'cafeteria', 'cafe', 'lanche', 'hamburg', 'confeitaria', 'doceria', 'bar do', 'pastel'] },
+  { category: 'Mercado', keywords: ['mercado', 'supermercado', 'hipermercado', 'atacad', 'hortifruti', 'carrefour', 'assai', 'pao de acucar', 'sacolao', 'acougue', 'mercearia', 'feira', 'dia supermercado', 'extra'] },
+  { category: 'Transporte', keywords: ['99app', '99*', '99 pop', 'uber', 'cabify', 'combust', 'gasolina', 'etanol', 'posto', 'estacionamento', 'pedagio', 'sem parar', 'conectcar', 'ipva', 'metro', 'onibus', 'bilhete unico', 'shell', 'ipiranga', 'lavagem'] },
+  { category: 'Saúde', keywords: ['totalpass', 'farmacia', 'drogaria', 'drogasil', 'raia', 'pacheco', 'academia', 'consulta', 'exame', 'dentista', 'odonto', 'unimed', 'hapvida', 'laboratorio', 'psicolog', 'clinica', 'plano de saude'] },
+  { category: 'Lazer', keywords: ['steam', 'netflix', 'spotify', 'ingresso', 'cinema', 'nupay', 'disney', 'hbo', 'prime video', 'youtube', 'xbox', 'playstation', 'psn', 'teatro', 'show', 'hotel', 'airbnb', 'booking', 'deezer', 'twitch', 'epic games'] },
+  { category: 'Compras', keywords: ['mercadolivre', 'mercado livre', 'shopee', 'amazon', 'shein', 'aliexpress', 'magalu', 'magazine luiza', 'americanas', 'kabum', 'casas bahia', 'temu', 'zara', 'renner', 'riachuelo', 'c&a', 'leroy', 'decathlon'] },
+  { category: 'Cuidado e Beleza', keywords: ['salao', 'barbearia', 'cosmetic', 'manicure', 'estetica', 'cabeleireiro', 'perfum', 'boticario', 'natura', 'sephora', 'depilacao'] },
+  { category: 'Moradia', keywords: ['aluguel', 'condominio', 'energia', 'sanepar', 'copel', 'sabesp', 'cemig', 'enel', 'iptu', 'luz', 'agua e esgoto', 'gas natural', 'seguro residencial', 'reforma'] },
+  { category: 'Telefonia', keywords: ['claro', 'vivo', 'tim', 'oi fibra', 'oi movel', 'internet', 'recarga', 'telefon', 'celular'] },
 ];
 
+// Palavra-chave só em texto "puro" (letras/números) casa no INÍCIO de uma palavra — assim "posto"
+// não casa dentro de "imposto" — e as curtas (até 4 letras, como "tim" ou "luz") só casam como
+// palavra inteira, pra não pegar "estimativa" ou "luzia". Chaves com símbolo/espaço ("ifd*", "oi fibra")
+// continuam como trecho simples.
+function keywordMatches(normalizedText, rawKeyword) {
+  const k = stripDiacritics(rawKeyword).toLowerCase().trim();
+  if (!k) return false;
+  if (!/^[a-z0-9]+$/.test(k)) return normalizedText.includes(k);
+  const re = new RegExp(`(^|[^a-z0-9])${k}${k.length <= 4 ? '([^a-z0-9]|$)' : ''}`);
+  return re.test(normalizedText);
+}
+
+// Entre todas as categorias, vence a palavra-chave MAIS ESPECÍFICA (a mais longa) que casar —
+// antes valia a primeira categoria da lista, então "Mercado Livre" caía em Mercado (por "mercado")
+// e "Claro" em Moradia, em vez de Compras e Telefonia.
 function guessCategory(title) {
   const t = stripDiacritics(String(title || '')).toLowerCase();
+  let best = null; let bestLen = 0;
   for (const group of CATEGORY_KEYWORDS) {
-    if (group.keywords.some((k) => t.includes(stripDiacritics(k).toLowerCase()))) {
-      // Traduz pelo nome atual, caso essa categoria base tenha sido renomeada nas configurações.
-      return CATEGORY_NAME_MAP[group.category] || group.category;
+    for (const k of group.keywords) {
+      if (k.trim().length > bestLen && keywordMatches(t, k)) { best = group.category; bestLen = k.trim().length; }
     }
   }
-  return 'Outros';
+  if (!best) return 'Outros';
+  // Traduz pelo nome atual, caso essa categoria base tenha sido renomeada nas configurações —
+  // e cai em Outros se ela foi ocultada (não existe mais nas categorias disponíveis).
+  const name = CATEGORY_NAME_MAP[best] || best;
+  return CATEGORIES[name] ? name : 'Outros';
 }
 
 function normalizeForFingerprint(description) {
   return stripDiacritics(String(description || ''))
     .toLowerCase()
+    .replace(/\(\s*\d+\s*\/\s*\d+\s*\)/g, '')
+    .replace(/parcelas?\s+antecipadas?/g, '')
     .replace(/parcela\s*\d+\/\d+/g, '')
     .replace(/\d+\/\d+\s*$/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
@@ -1076,6 +1098,63 @@ function textSimilarity(a, b) {
   let common = 0;
   wordsA.forEach((w) => { if (wordsB.has(w)) common++; });
   return common / Math.max(wordsA.size, wordsB.size);
+}
+
+// Pontuação (0 a ~1.2) de quão bem uma descrição do histórico responde ao que está sendo digitado.
+// Diferente do textSimilarity (que só conta palavras idênticas), aceita a palavra ainda incompleta
+// ("ube" → "uber") e premia a descrição igual. Descrições bem mais longas que a digitada pontuam menos.
+function autofillMatchScore(query, desc) {
+  const q = normalizeForFingerprint(query);
+  const d = normalizeForFingerprint(desc);
+  if (!q || !d) return 0;
+  if (q === d) return 1.2;
+  const qt = q.split(' ').filter(Boolean);
+  const dt = d.split(' ').filter(Boolean);
+  let sum = 0;
+  qt.forEach((tok, i) => {
+    if (dt.includes(tok)) sum += 1;
+    else if (tok.length >= 2 && dt.some((w) => w.startsWith(tok))) sum += i === qt.length - 1 ? 0.9 : 0.6;
+  });
+  if (sum === 0) return 0;
+  return 0.7 * (sum / qt.length) + 0.3 * (sum / Math.max(qt.length, dt.length));
+}
+
+// Sugestão a partir do histórico: em vez de copiar o UM lançamento mais parecido, junta todos os
+// que combinam bem e escolhe a categoria e a forma de pagamento mais usadas (dando mais peso aos
+// mais recentes). O valor sugerido vem do lançamento mais recente com o melhor casamento.
+function suggestFromHistory(query, type, transactions, cards, accounts) {
+  const today = ymd(new Date());
+  const scored = [];
+  transactions.forEach((t) => {
+    if (t.type !== type || !t.description || t.isInvoicePayment || t.date > today) return;
+    const score = autofillMatchScore(query, t.description);
+    if (score >= 0.6) scored.push({ t, score });
+  });
+  if (scored.length === 0) return null;
+  const top = Math.max(...scored.map((x) => x.score));
+  const pool = scored.filter((x) => x.score >= top - 0.15).sort((a, b) => b.t.date.localeCompare(a.t.date));
+  const tally = (keyFn) => {
+    const m = new Map();
+    pool.forEach((x, rank) => { const k = keyFn(x.t); const e = m.get(k) || { w: 0, t: x.t }; e.w += x.score * Math.pow(0.85, rank); m.set(k, e); });
+    return [...m.values()].sort((a, b) => b.w - a.w)[0].t;
+  };
+  const byCategory = tally((t) => t.category);
+  const bySource = tally((t) => `${t.paymentMethod}|${t.account || ''}|${t.cardId || ''}|${t.benefitId || ''}`);
+  const bestMatch = pool.filter((x) => x.score >= top - 0.001)[0].t;
+  const cardOk = !bySource.cardId || cards.some((c) => c.id === bySource.cardId);
+  const accountOk = !bySource.account || accounts.some((a) => a.id === bySource.account);
+  return {
+    category: byCategory.category,
+    paymentMethod: bySource.paymentMethod,
+    account: accountOk ? (bySource.account || null) : null,
+    cardId: cardOk ? (bySource.cardId ?? null) : null,
+    benefitId: bySource.benefitId ?? null,
+    benefitType: bySource.benefitType ?? null,
+    amount: !bestMatch.installmentGroupId && !bestMatch.isSalary && bestMatch.amount > 0 ? bestMatch.amount : null,
+    sourceDescription: bestMatch.description,
+    sampleSize: pool.length,
+    exact: top >= 1.2,
+  };
 }
 
 // Acha, entre os lançamentos já existentes ainda não "usados" por outra linha da fatura, o
@@ -3760,6 +3839,7 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   const [flashField, setFlashField] = useState(null);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [autofillNotice, setAutofillNotice] = useState(null);
+  const [amountSuggestion, setAmountSuggestion] = useState(null); // { value, label } — último valor usado numa descrição igual/parecida
   const [sessionPatternNotice, setSessionPatternNotice] = useState(null);
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [paymentTouched, setPaymentTouched] = useState(false);
@@ -3828,31 +3908,38 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
   // preenche sozinho a categoria e a forma de pagamento usadas da última vez. Reaproveita o
   // mesmo textSimilarity já usado na detecção de duplicata da importação.
   useEffect(() => {
-    if (initial || (categoryTouched && paymentTouched)) { setAutofillNotice(null); return; }
+    if (initial) { setAutofillNotice(null); setAmountSuggestion(null); return; }
     const q = form.description.trim();
-    if (q.length < 3) { setAutofillNotice(null); return; }
+    if (q.length < 3) { setAutofillNotice(null); setAmountSuggestion(null); return; }
     const id = setTimeout(() => {
-      let best = null; let bestScore = 0;
-      transactions.forEach((t) => {
-        if (t.type !== form.type || !t.description || t.description.trim().toLowerCase() === q.toLowerCase()) return;
-        const score = textSimilarity(q, t.description);
-        if (score > bestScore) { bestScore = score; best = t; }
-      });
-      if (bestScore < 0.5 || !best) { setAutofillNotice(null); return; }
+      const sug = suggestFromHistory(q, form.type, transactions, cards, accounts);
+      if (!sug) {
+        // Sem histórico parecido: cai nas palavras-chave (ex: "Uber", "Netflix"), só pra categoria
+        // e só em despesa.
+        setAmountSuggestion(null);
+        const guess = form.type === 'despesa' && !categoryTouched ? guessCategory(q) : 'Outros';
+        if (guess !== 'Outros') {
+          setForm((f) => ({ ...f, category: guess }));
+          setAutofillNotice(`categoria sugerida pelo nome (${guess})`);
+        } else setAutofillNotice(null);
+        return;
+      }
       if (!paymentTouched) setSessionPatternNotice(null);
       setForm((f) => ({
         ...f,
-        category: categoryTouched ? f.category : best.category,
-        paymentMethod: paymentTouched ? f.paymentMethod : best.paymentMethod,
-        account: paymentTouched ? f.account : (best.account || f.account),
-        cardId: paymentTouched ? f.cardId : (best.cardId ?? null),
-        benefitId: paymentTouched ? f.benefitId : (best.benefitId ?? null),
-        benefitType: paymentTouched ? f.benefitType : (best.benefitType ?? null),
+        category: categoryTouched ? f.category : sug.category,
+        paymentMethod: paymentTouched ? f.paymentMethod : sug.paymentMethod,
+        account: paymentTouched ? f.account : (sug.account || f.account),
+        cardId: paymentTouched ? f.cardId : sug.cardId,
+        benefitId: paymentTouched ? f.benefitId : sug.benefitId,
+        benefitType: paymentTouched ? f.benefitType : sug.benefitType,
       }));
-      const filledWhat = !categoryTouched && !paymentTouched ? 'categoria e forma de pagamento'
-        : !categoryTouched ? 'categoria' : !paymentTouched ? 'forma de pagamento' : null;
-      setAutofillNotice(filledWhat ? `${filledWhat} preenchida com base em "${best.description}"` : null);
-    }, 400);
+      setAmountSuggestion(sug.amount ? { value: sug.amount, label: sug.sourceDescription } : null);
+      const filledWhat = !categoryTouched && !paymentTouched ? 'categoria e forma de pagamento preenchidas'
+        : !categoryTouched ? 'categoria preenchida' : !paymentTouched ? 'forma de pagamento preenchida' : null;
+      const basis = sug.sampleSize > 1 ? `nos ${sug.sampleSize} lançamentos parecidos com "${sug.sourceDescription}"` : `em "${sug.sourceDescription}"`;
+      setAutofillNotice(filledWhat ? `${filledWhat} com base ${basis}` : null);
+    }, 350);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.description, form.type, categoryTouched, paymentTouched]);
@@ -3972,6 +4059,11 @@ function TransactionForm({ initial, accounts, cards, benefits = [], transactions
           <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputClass} style={inputStyle} placeholder="Ex: Supermercado" />
           {errors.description && <p className="text-xs mt-1" style={{ color: 'var(--expense)' }}>{errors.description}</p>}
           {autofillNotice && <p className="text-xs mt-1.5" style={{ color: 'var(--primary)' }}>{autofillNotice}</p>}
+          {amountSuggestion && !form.isSalary && !installmentEnabled && Math.abs(form.amount - amountSuggestion.value) > 0.004 && (
+            <button type="button" onClick={() => { setForm((f) => ({ ...f, amount: amountSuggestion.value })); setAmountSuggestion(null); }} className="mt-1.5 text-xs px-2.5 py-1 rounded-full font-medium focus-ring" style={{ backgroundColor: 'var(--primary-soft)', color: 'var(--primary)' }}>
+              Usar {formatBRL(amountSuggestion.value)} (último valor em "{amountSuggestion.label}")
+            </button>
+          )}
         </div>
 
         {form.isSalary && (
